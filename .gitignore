@@ -1,0 +1,11 @@
+# Ignore the entire build directory
+# This contains compiled object files (.o) and our final executable (mycc)
+/build/
+
+# Ignore any assembly or executable files we create for testing in the root
+*.s
+my_executable
+my_program
+
+# Ignore VS Code specific settings
+.vscode/
