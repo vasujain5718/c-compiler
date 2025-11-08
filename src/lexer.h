@@ -6,16 +6,53 @@
 
 enum class TokenType {
     TOKEN_EOF,
+
+    // Keywords
     TOKEN_KEYWORD_INT,
     TOKEN_KEYWORD_VOID,
     TOKEN_KEYWORD_RETURN,
+    TOKEN_KEYWORD_IF,
+    TOKEN_KEYWORD_ELSE,
+    TOKEN_QUESTION,
+    TOKEN_COLON,
+
+    // Identifiers and Constants
     TOKEN_IDENTIFIER,
     TOKEN_CONSTANT,
+
+    // Punctuation
     TOKEN_OPEN_PAREN,
     TOKEN_CLOSE_PAREN,
     TOKEN_OPEN_BRACE,
     TOKEN_CLOSE_BRACE,
     TOKEN_SEMICOLON,
+
+    // Chapter 2 Unary Operators
+    TOKEN_OPERATOR_MINUS,
+    TOKEN_OPERATOR_BITWISE_COMPLEMENT,
+
+    // Chapter 3 Binary Operators
+    TOKEN_OPERATOR_PLUS,
+    TOKEN_OPERATOR_MULTIPLY,
+    TOKEN_OPERATOR_DIVIDE,
+    TOKEN_OPERATOR_MODULO,
+    TOKEN_OPERATOR_DECREMENT, 
+
+    // NEW: Chapter 4 Operators
+    TOKEN_OPERATOR_LOGICAL_NEG,   // !
+    TOKEN_OPERATOR_LOGICAL_AND,   // &&
+    TOKEN_OPERATOR_LOGICAL_OR,    // ||
+    TOKEN_OPERATOR_EQUAL,         // ==
+    TOKEN_OPERATOR_NOT_EQUAL,     // !=
+    TOKEN_OPERATOR_LESS,          // <
+    TOKEN_OPERATOR_LESS_EQUAL,    // <=
+    TOKEN_OPERATOR_GREATER,       // >
+    TOKEN_OPERATOR_GREATER_EQUAL, // >=
+    TOKEN_OPERATOR_ASSIGN,        // =
+    TOKEN_OPERATOR_BITWISE_AND,   // &
+    TOKEN_OPERATOR_BITWISE_OR,    // |
+
+    // To handle unknown characters
     TOKEN_ILLEGAL
 };
 
@@ -28,7 +65,7 @@ struct Token {
 
 class Lexer {
 public:
-    Lexer(const std::string& source);
+    explicit Lexer(const std::string& source);
     std::vector<Token> tokenize();
     bool hadError() const { return had_error; }
 
@@ -47,4 +84,4 @@ private:
 
 const char* token_type_to_string(TokenType type);
 
-#endif // LEXER_H
+#endif
