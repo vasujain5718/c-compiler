@@ -55,7 +55,15 @@ void SemanticAnalysis::resolve_statement(StatementAST* stmt) {
         resolve_expression(expr_stmt->Expression.get());
     }
     else if (dynamic_cast<NullStatementAST*>(stmt)) {
-        // Do nothing for null statements
+        // no-op
+    }
+    else if (auto* if_stmt = dynamic_cast<IfStatementAST*>(stmt)) {
+        // handle if/else
+        resolve_expression(if_stmt->Condition.get());
+        resolve_statement(if_stmt->ThenBranch.get());
+        if (if_stmt->ElseBranch) {
+            resolve_statement(if_stmt->ElseBranch.get());
+        }
     }
     else {
         throw runtime_error("Unknown statement type during resolution.");
@@ -64,21 +72,15 @@ void SemanticAnalysis::resolve_statement(StatementAST* stmt) {
 
 void SemanticAnalysis::resolve_expression(ExprAST* expr) {
     if (auto* var_expr = dynamic_cast<VarExprAST*>(expr)) {
-        // Variable Usage: Look it up in the symbol table
         if (current_scope.find(var_expr->Name) == current_scope.end()) {
             throw runtime_error("Semantic Error: Undeclared variable '" + var_expr->Name + "'.");
         }
-        // Replace the name with the unique version from the table
         var_expr->Name = current_scope[var_expr->Name];
     }
     else if (auto* assign_expr = dynamic_cast<AssignmentExprAST*>(expr)) {
-        // Assignment: The LHS *must* be a variable.
-        // We check this BEFORE resolving the LHS, because we need its original name if it is a var.
         if (dynamic_cast<VarExprAST*>(assign_expr->LHS.get()) == nullptr) {
             throw runtime_error("Semantic Error: Invalid lvalue in assignment. Left side must be a variable.");
         }
-
-        // Resolve both sides.
         resolve_expression(assign_expr->LHS.get());
         resolve_expression(assign_expr->RHS.get());
     }
@@ -89,8 +91,15 @@ void SemanticAnalysis::resolve_expression(ExprAST* expr) {
         resolve_expression(binary_expr->LHS.get());
         resolve_expression(binary_expr->RHS.get());
     }
-    // Constants require no resolution.
+    else if (auto* cond = dynamic_cast<ConditionalExprAST*>(expr)) {
+        // ternary ?: support
+        resolve_expression(cond->Condition.get());
+        resolve_expression(cond->ThenExpr.get());
+        resolve_expression(cond->ElseExpr.get());
+    }
+    // constants: no-op
 }
+
 
 string SemanticAnalysis::make_unique_name(const string& original_name) {
     // Example: "x" might become "x.0" or "x.5"

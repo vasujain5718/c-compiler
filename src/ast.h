@@ -2,10 +2,13 @@
 #define AST_H
 
 #include "lexer.h"
-#include <string>
 #include <memory>
-#include <vector>
+#include <string>
 #include <utility>
+#include <vector>
+
+// Forward declare before use
+struct BlockAST;
 
 // --- Base class for all expressions ---
 struct ExprAST {
@@ -14,7 +17,7 @@ struct ExprAST {
 
 // --- Expression Nodes (as per ASDL) ---
 struct ConstantExprAST : ExprAST {
-    std::string Val; // Keeping this as string for now, as in your parser
+    std::string Val; // keep as string for now
     explicit ConstantExprAST(std::string Val) : Val(std::move(Val)) {}
 };
 
@@ -26,7 +29,8 @@ struct VarExprAST : ExprAST {
 struct UnaryExprAST : ExprAST {
     Token Op;
     std::unique_ptr<ExprAST> Operand;
-    UnaryExprAST(Token Op, std::unique_ptr<ExprAST> Operand) : Op(std::move(Op)), Operand(std::move(Operand)) {}
+    UnaryExprAST(Token Op, std::unique_ptr<ExprAST> Operand)
+        : Op(std::move(Op)), Operand(std::move(Operand)) {}
 };
 
 struct BinaryExprAST : ExprAST {
@@ -43,26 +47,68 @@ struct AssignmentExprAST : ExprAST {
         : LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 };
 
+struct ConditionalExprAST : ExprAST {
+    std::unique_ptr<ExprAST> Condition;
+    std::unique_ptr<ExprAST> ThenExpr;
+    std::unique_ptr<ExprAST> ElseExpr;
+    ConditionalExprAST(std::unique_ptr<ExprAST> Condition,
+                       std::unique_ptr<ExprAST> ThenExpr,
+                       std::unique_ptr<ExprAST> ElseExpr)
+        : Condition(std::move(Condition)),
+          ThenExpr(std::move(ThenExpr)),
+          ElseExpr(std::move(ElseExpr)) {}
+};
+
 // --- Base class for items in a function body ---
 struct BlockItemAST {
     virtual ~BlockItemAST() = default;
 };
 
 // --- Statement Nodes (inherit from BlockItemAST) ---
-struct StatementAST : BlockItemAST {};
+struct StatementAST : BlockItemAST {
+    virtual ~StatementAST() = default;
+};
 
 struct ReturnStatementAST : StatementAST {
     std::unique_ptr<ExprAST> Expression;
-    explicit ReturnStatementAST(std::unique_ptr<ExprAST> Expression) : Expression(std::move(Expression)) {}
+    explicit ReturnStatementAST(std::unique_ptr<ExprAST> Expression)
+        : Expression(std::move(Expression)) {}
 };
 
 struct ExpressionStatementAST : StatementAST {
     std::unique_ptr<ExprAST> Expression;
-    explicit ExpressionStatementAST(std::unique_ptr<ExprAST> Expression) : Expression(std::move(Expression)) {}
+    explicit ExpressionStatementAST(std::unique_ptr<ExprAST> Expression)
+        : Expression(std::move(Expression)) {}
 };
 
 struct NullStatementAST : StatementAST {
     NullStatementAST() = default;
+};
+
+struct IfStatementAST : StatementAST {
+    std::unique_ptr<ExprAST> Condition;
+    std::unique_ptr<StatementAST> ThenBranch;
+    std::unique_ptr<StatementAST> ElseBranch; // Can be nullptr
+    IfStatementAST(std::unique_ptr<ExprAST> Condition,
+                   std::unique_ptr<StatementAST> ThenBranch,
+                   std::unique_ptr<StatementAST> ElseBranch = nullptr)
+        : Condition(std::move(Condition)),
+          ThenBranch(std::move(ThenBranch)),
+          ElseBranch(std::move(ElseBranch)) {}
+};
+
+// Block container
+struct BlockAST {
+    std::vector<std::unique_ptr<BlockItemAST>> Items;
+    explicit BlockAST(std::vector<std::unique_ptr<BlockItemAST>> Items)
+        : Items(std::move(Items)) {}
+};
+
+// Compound statement that owns a BlockAST
+struct CompoundStatementAST : StatementAST {
+    std::unique_ptr<BlockAST> body_;
+    explicit CompoundStatementAST(std::unique_ptr<BlockAST> body)
+        : body_(std::move(body)) {}
 };
 
 // --- Declaration Node (also inherits from BlockItemAST) ---
@@ -76,9 +122,9 @@ struct DeclarationAST : BlockItemAST {
 // --- Top Level ---
 struct FunctionAST {
     std::string Name;
-    std::vector<std::unique_ptr<BlockItemAST>> Body; // Body is now a list of BlockItemASTs
+    std::vector<std::unique_ptr<BlockItemAST>> Body; // list of BlockItemASTs
     FunctionAST(std::string Name, std::vector<std::unique_ptr<BlockItemAST>> Body)
         : Name(std::move(Name)), Body(std::move(Body)) {}
 };
 
-#endif
+#endif // AST_H

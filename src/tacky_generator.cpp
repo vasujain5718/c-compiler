@@ -65,6 +65,31 @@ void TackyGenerator::generate_statement(const StatementAST* stmt, vector<unique_
         auto return_val = generate_expression(ret_stmt->Expression.get(), instructions);
         instructions.push_back(make_unique<tacky::ReturnInstruction>(move(return_val)));
     } 
+    else if (auto* if_stmt = dynamic_cast<const IfStatementAST*>(stmt)) {
+    // Evaluate condition
+    auto c = generate_expression(if_stmt->Condition.get(), instructions);
+
+    if (if_stmt->ElseBranch) {
+        // if (c) then S1 else S2
+        string else_label = make_label();
+        string end_label  = make_label();
+
+        instructions.push_back(make_unique<tacky::JumpIfZeroInstruction>(std::move(c), else_label));
+        generate_statement(if_stmt->ThenBranch.get(), instructions);
+        instructions.push_back(make_unique<tacky::JumpInstruction>(end_label));
+        instructions.push_back(make_unique<tacky::LabelInstruction>(else_label));
+        generate_statement(if_stmt->ElseBranch.get(), instructions);
+        instructions.push_back(make_unique<tacky::LabelInstruction>(end_label));
+    } else {
+        // if (c) then S
+        string end_label = make_label();
+
+        instructions.push_back(make_unique<tacky::JumpIfZeroInstruction>(std::move(c), end_label));
+        generate_statement(if_stmt->ThenBranch.get(), instructions);
+        instructions.push_back(make_unique<tacky::LabelInstruction>(end_label));
+    }
+}
+
     else if (auto* expr_stmt = dynamic_cast<const ExpressionStatementAST*>(stmt)) {
         // Generate the expression for its side effects (like assignment), but ignore the result.
         generate_expression(expr_stmt->Expression.get(), instructions);
@@ -82,6 +107,38 @@ unique_ptr<tacky::Value> TackyGenerator::generate_expression(const ExprAST* expr
         // Note: using the string Val directly here.
         return make_unique<tacky::Constant>(const_expr->Val);
     }
+    else if (auto* cexpr = dynamic_cast<const ConditionalExprAST*>(expr)) {
+    // <instructions for condition>
+    auto c = generate_expression(cexpr->Condition.get(), instructions);
+
+    string e2_label = make_label();
+    string end_label = make_label();
+    auto result = make_temporary();  // destination to hold the overall expression result
+
+    // JumpIfZero(c, e2_label)
+    instructions.push_back(make_unique<tacky::JumpIfZeroInstruction>(std::move(c), e2_label));
+
+    // <instructions to calculate e1>
+    auto v1 = generate_expression(cexpr->ThenExpr.get(), instructions);
+    // result = v1
+    instructions.push_back(make_unique<tacky::CopyInstruction>(std::move(v1), make_unique<tacky::Var>(result->name)));
+    // Jump(end)
+    instructions.push_back(make_unique<tacky::JumpInstruction>(end_label));
+
+    // Label(e2_label)
+    instructions.push_back(make_unique<tacky::LabelInstruction>(e2_label));
+
+    // <instructions to calculate e2>
+    auto v2 = generate_expression(cexpr->ElseExpr.get(), instructions);
+    // result = v2
+    instructions.push_back(make_unique<tacky::CopyInstruction>(std::move(v2), make_unique<tacky::Var>(result->name)));
+
+    // Label(end)
+    instructions.push_back(make_unique<tacky::LabelInstruction>(end_label));
+
+    return result; // the value of the conditional expression
+}
+
     else if (auto* var_expr = dynamic_cast<const VarExprAST*>(expr)) {
         return make_unique<tacky::Var>(var_expr->Name);
     }
