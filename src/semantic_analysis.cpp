@@ -1,107 +1,158 @@
 #include "semantic_analysis.h"
 #include <stdexcept>
 #include <iostream>
+#include <utility>
 
-using std::string;
-using std::map;
-using std::to_string;
 using std::runtime_error;
+using std::string;
+
+// ===== Public =====
 
 void SemanticAnalysis::resolve(FunctionAST* function) {
-    // Reset for each function (though right now we only have one)
-    current_scope.clear();
     unique_counter = 0;
 
-    for (auto& block_item : function->Body) {
-        resolve_block_item(block_item.get());
+    VarMap varmap; // starts empty for the function body
+    // The function's top-level "block" (its body vector) is processed as a block
+    resolve_block(function->Body, varmap);
+}
+
+// ===== Helpers =====
+
+std::string SemanticAnalysis::make_unique_name(const string& original_name) {
+    return original_name + "." + std::to_string(unique_counter++);
+}
+
+SemanticAnalysis::VarMap SemanticAnalysis::copy_variable_map(const VarMap& m) {
+    VarMap copy = m;
+    // Entering a new block: every entry is now from an *outer* block
+    for (auto& kv : copy) {
+        kv.second.from_current_block = false;
+    }
+    return copy;
+}
+
+// Process a sequence of BlockItemAST in the *current* block scope
+void SemanticAnalysis::resolve_block(
+    const std::vector<std::unique_ptr<BlockItemAST>>& items,
+    VarMap& varmap
+) {
+    for (auto& item : items) {
+        resolve_block_item(item.get(), varmap);
     }
 }
 
-void SemanticAnalysis::resolve_block_item(BlockItemAST* item) {
+void SemanticAnalysis::resolve_block_item(BlockItemAST* item, VarMap& varmap) {
     if (auto* decl = dynamic_cast<DeclarationAST*>(item)) {
-        resolve_declaration(decl);
+        resolve_declaration(decl, varmap);
     } else if (auto* stmt = dynamic_cast<StatementAST*>(item)) {
-        resolve_statement(stmt);
+        resolve_statement(stmt, varmap);
     } else {
         throw runtime_error("Unknown block item type during semantic analysis.");
     }
 }
 
-void SemanticAnalysis::resolve_declaration(DeclarationAST* decl) {
-    // 1) Duplicate in current scope?
-    if (current_scope.count(decl->VarName)) {
-        throw runtime_error("Semantic Error: Duplicate declaration of variable '" + decl->VarName + "'.");
+// ===== Declarations =====
+
+void SemanticAnalysis::resolve_declaration(DeclarationAST* decl, VarMap& varmap) {
+    // Duplicate only if already declared in *this* block
+    auto it = varmap.find(decl->VarName);
+    if (it != varmap.end() && it->second.from_current_block) {
+        throw runtime_error("Semantic Error: Duplicate declaration of variable '" + decl->VarName + "' in the same block.");
     }
 
-    // 2) Introduce the variable first (so it's visible in its own initializer)
-    string unique_name = make_unique_name(decl->VarName);
-    current_scope[decl->VarName] = unique_name;
+    // Introduce the variable first (visible to its own initializer)
+    std::string unique_name = make_unique_name(decl->VarName);
+    varmap[decl->VarName] = MapEntry{unique_name, /*from_current_block=*/true};
 
-    // 3) Update the decl's stored name to the unique one
+    // Update declaration's stored name to the unique one
     decl->VarName = unique_name;
 
-    // 4) Now resolve the initializer (it can legally refer to the var)
+    // Resolve initializer (may reference itself or other names)
     if (decl->InitExpr) {
-        resolve_expression(decl->InitExpr.get());
+        resolve_expression(decl->InitExpr.get(), varmap);
     }
 }
 
+// ===== Statements =====
 
-void SemanticAnalysis::resolve_statement(StatementAST* stmt) {
+void SemanticAnalysis::resolve_statement(StatementAST* stmt, VarMap& varmap) {
     if (auto* ret_stmt = dynamic_cast<ReturnStatementAST*>(stmt)) {
-        resolve_expression(ret_stmt->Expression.get());
-    } 
-    else if (auto* expr_stmt = dynamic_cast<ExpressionStatementAST*>(stmt)) {
-        resolve_expression(expr_stmt->Expression.get());
+        resolve_expression(ret_stmt->Expression.get(), varmap);
+        return;
     }
-    else if (dynamic_cast<NullStatementAST*>(stmt)) {
+
+    if (auto* expr_stmt = dynamic_cast<ExpressionStatementAST*>(stmt)) {
+        resolve_expression(expr_stmt->Expression.get(), varmap);
+        return;
+    }
+
+    if (dynamic_cast<NullStatementAST*>(stmt)) {
         // no-op
+        return;
     }
-    else if (auto* if_stmt = dynamic_cast<IfStatementAST*>(stmt)) {
-        // handle if/else
-        resolve_expression(if_stmt->Condition.get());
-        resolve_statement(if_stmt->ThenBranch.get());
+
+    if (auto* if_stmt = dynamic_cast<IfStatementAST*>(stmt)) {
+        resolve_expression(if_stmt->Condition.get(), varmap);
+        resolve_statement(if_stmt->ThenBranch.get(), varmap);
         if (if_stmt->ElseBranch) {
-            resolve_statement(if_stmt->ElseBranch.get());
+            resolve_statement(if_stmt->ElseBranch.get(), varmap);
         }
+        return;
     }
-    else {
-        throw runtime_error("Unknown statement type during resolution.");
+
+    // Compound block: create a *copied* variable map where entries become outer
+    if (auto* comp = dynamic_cast<CompoundStatementAST*>(stmt)) {
+        VarMap inner = copy_variable_map(varmap);
+        resolve_block(comp->body_->Items, inner);
+        // Discard 'inner' so declarations are not visible outside
+        return;
     }
+
+    throw runtime_error("Unknown statement type during resolution.");
 }
 
-void SemanticAnalysis::resolve_expression(ExprAST* expr) {
+// ===== Expressions =====
+
+void SemanticAnalysis::resolve_expression(ExprAST* expr, VarMap& varmap) {
     if (auto* var_expr = dynamic_cast<VarExprAST*>(expr)) {
-        if (current_scope.find(var_expr->Name) == current_scope.end()) {
+        auto it = varmap.find(var_expr->Name);
+        if (it == varmap.end()) {
             throw runtime_error("Semantic Error: Undeclared variable '" + var_expr->Name + "'.");
         }
-        var_expr->Name = current_scope[var_expr->Name];
+        var_expr->Name = it->second.unique_name;
+        return;
     }
-    else if (auto* assign_expr = dynamic_cast<AssignmentExprAST*>(expr)) {
-        if (dynamic_cast<VarExprAST*>(assign_expr->LHS.get()) == nullptr) {
+
+    if (auto* assign_expr = dynamic_cast<AssignmentExprAST*>(expr)) {
+        // LHS must be a var (lvalue). Check before rewriting the name.
+        auto* lhs_var = dynamic_cast<VarExprAST*>(assign_expr->LHS.get());
+        if (!lhs_var) {
             throw runtime_error("Semantic Error: Invalid lvalue in assignment. Left side must be a variable.");
         }
-        resolve_expression(assign_expr->LHS.get());
-        resolve_expression(assign_expr->RHS.get());
-    }
-    else if (auto* unary_expr = dynamic_cast<UnaryExprAST*>(expr)) {
-        resolve_expression(unary_expr->Operand.get());
-    }
-    else if (auto* binary_expr = dynamic_cast<BinaryExprAST*>(expr)) {
-        resolve_expression(binary_expr->LHS.get());
-        resolve_expression(binary_expr->RHS.get());
-    }
-    else if (auto* cond = dynamic_cast<ConditionalExprAST*>(expr)) {
-        // ternary ?: support
-        resolve_expression(cond->Condition.get());
-        resolve_expression(cond->ThenExpr.get());
-        resolve_expression(cond->ElseExpr.get());
-    }
-    // constants: no-op
-}
 
+        // Resolve both sides (will rewrite LHS name to unique)
+        resolve_expression(assign_expr->LHS.get(), varmap);
+        resolve_expression(assign_expr->RHS.get(), varmap);
+        return;
+    }
 
-string SemanticAnalysis::make_unique_name(const string& original_name) {
-    // Example: "x" might become "x.0" or "x.5"
-    return original_name + "." + to_string(unique_counter++);
+    if (auto* unary_expr = dynamic_cast<UnaryExprAST*>(expr)) {
+        resolve_expression(unary_expr->Operand.get(), varmap);
+        return;
+    }
+
+    if (auto* binary_expr = dynamic_cast<BinaryExprAST*>(expr)) {
+        resolve_expression(binary_expr->LHS.get(), varmap);
+        resolve_expression(binary_expr->RHS.get(), varmap);
+        return;
+    }
+
+    if (auto* cond = dynamic_cast<ConditionalExprAST*>(expr)) {
+        resolve_expression(cond->Condition.get(), varmap);
+        resolve_expression(cond->ThenExpr.get(), varmap);
+        resolve_expression(cond->ElseExpr.get(), varmap);
+        return;
+    }
+
+    // ConstantExprAST or unknown node types: constants are no-op
 }

@@ -8,22 +8,31 @@
 
 class SemanticAnalysis {
 public:
-    // The entry point for this pass. It can throw std::runtime_error on failure.
-    void resolve(FunctionAST* program);
+    // Entry point: resolves names in-place (may throw std::runtime_error).
+    void resolve(FunctionAST* function);
 
 private:
-    // The Symbol Table: Maps original source names ("x") to unique internal names ("x.0")
-    std::map<std::string, std::string> current_scope;
+    struct MapEntry {
+        std::string unique_name;
+        bool from_current_block;
+    };
+
+    using VarMap = std::map<std::string, MapEntry>;
+
     int unique_counter = 0;
 
-    // Helper to generate unique names like "var_name.123"
+    // Helpers
     std::string make_unique_name(const std::string& original_name);
+    VarMap copy_variable_map(const VarMap& m);
 
-    // Recursive resolution functions matching the AST structure
-    void resolve_block_item(BlockItemAST* item);
-    void resolve_statement(StatementAST* stmt);
-    void resolve_declaration(DeclarationAST* decl);
-    void resolve_expression(ExprAST* expr);
+    // Block processing
+    void resolve_block(const std::vector<std::unique_ptr<BlockItemAST>>& items, VarMap& varmap);
+
+    // Node-specific resolvers
+    void resolve_block_item(BlockItemAST* item, VarMap& varmap);
+    void resolve_statement(StatementAST* stmt, VarMap& varmap);
+    void resolve_declaration(DeclarationAST* decl, VarMap& varmap);
+    void resolve_expression(ExprAST* expr, VarMap& varmap);
 };
 
 #endif // SEMANTIC_ANALYSIS_H
