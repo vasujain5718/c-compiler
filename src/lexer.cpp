@@ -33,12 +33,18 @@ Token Lexer::create_token(TokenType type, const string& value) {
 
 TokenType Lexer::get_identifier_type(const string& identifier) {
     static const map<string, TokenType> keywords = {
-        {"int", TokenType::TOKEN_KEYWORD_INT},
-        {"void", TokenType::TOKEN_KEYWORD_VOID},
-        {"return", TokenType::TOKEN_KEYWORD_RETURN},
-        {"if", TokenType::TOKEN_KEYWORD_IF},
-        {"else", TokenType::TOKEN_KEYWORD_ELSE}
-    };
+    {"int", TokenType::TOKEN_KEYWORD_INT},
+    {"void", TokenType::TOKEN_KEYWORD_VOID},
+    {"return", TokenType::TOKEN_KEYWORD_RETURN},
+    {"if", TokenType::TOKEN_KEYWORD_IF},
+    {"else", TokenType::TOKEN_KEYWORD_ELSE},
+    {"do", TokenType::TOKEN_KEYWORD_DO},
+    {"while", TokenType::TOKEN_KEYWORD_WHILE},
+    {"for", TokenType::TOKEN_KEYWORD_FOR},
+    {"break", TokenType::TOKEN_KEYWORD_BREAK},
+    {"continue", TokenType::TOKEN_KEYWORD_CONTINUE},
+};
+
     auto it = keywords.find(identifier);
     if (it != keywords.end()) {
         return it->second;

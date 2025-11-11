@@ -57,25 +57,47 @@ void CodeGenerator::generate_instruction(const tacky::Instruction* tacky_inst, i
         auto dst = translate_val(unary_inst->dst.get());
         auto dst_clone = clone_stack_op(dst.get());
 
-        // --- FIX FOR LOGICAL NOT ---
+        // Logical NOT: (!x) == (x == 0)
         if (unary_inst->op == tacky::UnaryOperatorType::LogicalNot) {
-            // Implement `!x` as `x == 0`
-            // 1. Cmp(Imm(0), src)
+            // 1) cmp 0, src  (taking care with mem operands)
             if (dynamic_cast<ir::Stack*>(src.get())) {
-                ir_func->instructions.push_back(make_unique<ir::MovInstruction>(make_unique<ir::Immediate>("0"), make_unique<ir::Register>(ir::Reg(ir::RegType::R10))));
-                ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::R10)), move(src)));
+                ir_func->instructions.push_back(make_unique<ir::MovInstruction>(
+                    make_unique<ir::Immediate>("0"),
+                    make_unique<ir::Register>(ir::Reg(ir::RegType::R10))
+                ));
+                ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(
+                    make_unique<ir::Register>(ir::Reg(ir::RegType::R10)),
+                    move(src)
+                ));
             } else {
-                ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(make_unique<ir::Immediate>("0"), move(src)));
+                ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(
+                    make_unique<ir::Immediate>("0"),
+                    move(src)
+                ));
             }
-            // 2. Mov(Imm(0), dst)
-            ir_func->instructions.push_back(make_unique<ir::MovInstruction>(make_unique<ir::Immediate>("0"), move(dst)));
-            // 3. SetCC(E, %r10b)
-            ir_func->instructions.push_back(make_unique<ir::SetCCInstruction>(ir::CondCode::E, make_unique<ir::Register>(ir::Reg(ir::RegType::R10))));
-            // 4. Mov(%r10d, dst)
-            ir_func->instructions.push_back(make_unique<ir::MovInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::R10)), move(dst_clone)));
+            // 2) dst = 0 (clear destination in memory)
+            ir_func->instructions.push_back(make_unique<ir::MovInstruction>(
+                make_unique<ir::Immediate>("0"),
+                move(dst)
+            ));
+            // 3) ZERO r10d BEFORE setcc to avoid garbage in upper bits
+            ir_func->instructions.push_back(make_unique<ir::MovInstruction>(
+                make_unique<ir::Immediate>("0"),
+                make_unique<ir::Register>(ir::Reg(ir::RegType::R10))
+            ));
+            // 4) setcc (E) -> %r10b
+            ir_func->instructions.push_back(make_unique<ir::SetCCInstruction>(
+                ir::CondCode::E,
+                make_unique<ir::Register>(ir::Reg(ir::RegType::R10))
+            ));
+            // 5) mov %r10d -> dst
+            ir_func->instructions.push_back(make_unique<ir::MovInstruction>(
+                make_unique<ir::Register>(ir::Reg(ir::RegType::R10)),
+                move(dst_clone)
+            ));
         } 
         else {
-            // Original logic for Negate and Complement
+            // Negate / Bitwise NOT
             auto* src_is_stack = dynamic_cast<ir::Stack*>(src.get());
             if (src_is_stack) {
                 auto reg_r10_src = make_unique<ir::Register>(ir::Reg(ir::RegType::R10));
@@ -89,7 +111,6 @@ void CodeGenerator::generate_instruction(const tacky::Instruction* tacky_inst, i
             ir_func->instructions.push_back(make_unique<ir::UnaryInstruction>(op_type, move(dst_clone)));
         }
     }
-    // --- END OF CORRECTED BLOCK ---
     else if(auto* binary_inst = dynamic_cast<const tacky::BinaryInstruction*>(tacky_inst)) {
         
         auto src1 = translate_val(binary_inst->src1.get());
@@ -102,6 +123,7 @@ void CodeGenerator::generate_instruction(const tacky::Instruction* tacky_inst, i
         auto* src1_is_stack = dynamic_cast<ir::Stack*>(src1.get());
         auto* dst_is_stack = dynamic_cast<ir::Stack*>(dst.get());
         
+        // dst = src1
         if (src1_is_stack && dst_is_stack) {
             auto reg_r10_src = make_unique<ir::Register>(ir::Reg(ir::RegType::R10));
             ir_func->instructions.push_back(make_unique<ir::MovInstruction>(move(src1), move(reg_r10_src)));
@@ -163,6 +185,7 @@ void CodeGenerator::generate_instruction(const tacky::Instruction* tacky_inst, i
             }
             
             default: {
+                // Relational operators: compare, zero dst, zero r10d, setcc -> r10b, mov r10d -> dst
                 auto src1_clone = translate_val(binary_inst->src1.get());
                 auto src2_clone = translate_val(binary_inst->src2.get());
                 
@@ -170,30 +193,55 @@ void CodeGenerator::generate_instruction(const tacky::Instruction* tacky_inst, i
                 auto* src2_clone_is_imm = dynamic_cast<ir::Immediate*>(src2_clone.get());
                 
                 if (src1_clone_is_stack && src2_clone_is_imm) {
-                    ir_func->instructions.push_back(make_unique<ir::MovInstruction>(move(src2_clone), make_unique<ir::Register>(ir::Reg(ir::RegType::R10))));
-                    ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::R10)), move(src1_clone)));
+                    ir_func->instructions.push_back(make_unique<ir::MovInstruction>(
+                        move(src2_clone),
+                        make_unique<ir::Register>(ir::Reg(ir::RegType::R10))
+                    ));
+                    ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(
+                        make_unique<ir::Register>(ir::Reg(ir::RegType::R10)),
+                        move(src1_clone)
+                    ));
                 } else {
-                    ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(move(src2_clone), move(src1_clone)));
+                    ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(
+                        move(src2_clone),
+                        move(src1_clone)
+                    ));
                 }
                 
-                ir_func->instructions.push_back(make_unique<ir::MovInstruction>(make_unique<ir::Immediate>("0"), move(dst_clone1)));
+                // dst = 0
+                ir_func->instructions.push_back(make_unique<ir::MovInstruction>(
+                    make_unique<ir::Immediate>("0"),
+                    move(dst_clone1)
+                ));
+
+                // >>> ZERO r10d BEFORE setcc <<<
+                ir_func->instructions.push_back(make_unique<ir::MovInstruction>(
+                    make_unique<ir::Immediate>("0"),
+                    make_unique<ir::Register>(ir::Reg(ir::RegType::R10))
+                ));
                 
                 auto reg_r10_byte = make_unique<ir::Register>(ir::Reg(ir::RegType::R10));
                 auto reg_r10_full = make_unique<ir::Register>(ir::Reg(ir::RegType::R10));
                 
                 ir::CondCode cond;
                 switch(binary_inst->op) {
-                    case tacky::BinaryOperatorType::Equal:        cond = ir::CondCode::E; break;
-                    case tacky::BinaryOperatorType::NotEqual:     cond = ir::CondCode::NE; break;
-                    case tacky::BinaryOperatorType::LessThan:     cond = ir::CondCode::L; break;
-                    case tacky::BinaryOperatorType::LessOrEqual:  cond = ir::CondCode::LE; break;
-                    case tacky::BinaryOperatorType::GreaterThan:  cond = ir::CondCode::G; break;
+                    case tacky::BinaryOperatorType::Equal:          cond = ir::CondCode::E;  break;
+                    case tacky::BinaryOperatorType::NotEqual:       cond = ir::CondCode::NE; break;
+                    case tacky::BinaryOperatorType::LessThan:       cond = ir::CondCode::L;  break;
+                    case tacky::BinaryOperatorType::LessOrEqual:    cond = ir::CondCode::LE; break;
+                    case tacky::BinaryOperatorType::GreaterThan:    cond = ir::CondCode::G;  break;
                     case tacky::BinaryOperatorType::GreaterOrEqual: cond = ir::CondCode::GE; break;
                     default: throw runtime_error("Unknown relational op");
                 }
-                ir_func->instructions.push_back(make_unique<ir::SetCCInstruction>(cond, move(reg_r10_byte)));
+                ir_func->instructions.push_back(make_unique<ir::SetCCInstruction>(
+                    cond,
+                    move(reg_r10_byte)
+                ));
                 
-                ir_func->instructions.push_back(make_unique<ir::MovInstruction>(move(reg_r10_full), move(dst_clone2)));
+                ir_func->instructions.push_back(make_unique<ir::MovInstruction>(
+                    move(reg_r10_full),
+                    move(dst_clone2)
+                ));
             }
         }
     }
@@ -215,19 +263,26 @@ void CodeGenerator::generate_instruction(const tacky::Instruction* tacky_inst, i
     else if (auto* jmp_inst = dynamic_cast<const tacky::JumpInstruction*>(tacky_inst)) {
         ir_func->instructions.push_back(make_unique<ir::JmpInstruction>(jmp_inst->target));
     }
-    // --- THIS BLOCK IS NOW CORRECTED ---
     else if (auto* jz_inst = dynamic_cast<const tacky::JumpIfZeroInstruction*>(tacky_inst)) {
         auto cond = translate_val(jz_inst->condition.get());
         auto imm_zero = make_unique<ir::Immediate>("0");
         
         if(dynamic_cast<ir::Stack*>(cond.get())) {
-            // FIX: Cmp(Imm, Stack) is invalid
-            ir_func->instructions.push_back(make_unique<ir::MovInstruction>(move(imm_zero), make_unique<ir::Register>(ir::Reg(ir::RegType::R10))));
-            ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::R10)), move(cond)));
+            // cmp (reg, mem) — move imm 0 to reg first
+            ir_func->instructions.push_back(make_unique<ir::MovInstruction>(
+                move(imm_zero),
+                make_unique<ir::Register>(ir::Reg(ir::RegType::R10))
+            ));
+            ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(
+                make_unique<ir::Register>(ir::Reg(ir::RegType::R10)),
+                move(cond)
+            ));
         } else {
-            ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(move(imm_zero), move(cond)));
+            ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(
+                move(imm_zero),
+                move(cond)
+            ));
         }
-        
         ir_func->instructions.push_back(make_unique<ir::JmpCCInstruction>(ir::CondCode::E, jz_inst->target));
     }
     else if (auto* jnz_inst = dynamic_cast<const tacky::JumpIfNotZeroInstruction*>(tacky_inst)) {
@@ -235,16 +290,22 @@ void CodeGenerator::generate_instruction(const tacky::Instruction* tacky_inst, i
         auto imm_zero = make_unique<ir::Immediate>("0");
 
         if(dynamic_cast<ir::Stack*>(cond.get())) {
-            // FIX: Cmp(Imm, Stack) is invalid
-            ir_func->instructions.push_back(make_unique<ir::MovInstruction>(move(imm_zero), make_unique<ir::Register>(ir::Reg(ir::RegType::R10))));
-            ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::R10)), move(cond)));
+            ir_func->instructions.push_back(make_unique<ir::MovInstruction>(
+                move(imm_zero),
+                make_unique<ir::Register>(ir::Reg(ir::RegType::R10))
+            ));
+            ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(
+                make_unique<ir::Register>(ir::Reg(ir::RegType::R10)),
+                move(cond)
+            ));
         } else {
-            ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(move(imm_zero), move(cond)));
+            ir_func->instructions.push_back(make_unique<ir::CmpInstruction>(
+                move(imm_zero),
+                move(cond)
+            ));
         }
-
         ir_func->instructions.push_back(make_unique<ir::JmpCCInstruction>(ir::CondCode::NE, jnz_inst->target));
     }
-    // --- END OF CORRECTED BLOCK ---
     else if (auto* label_inst = dynamic_cast<const tacky::LabelInstruction*>(tacky_inst)) {
         ir_func->instructions.push_back(make_unique<ir::LabelInstruction>(label_inst->target));
     }

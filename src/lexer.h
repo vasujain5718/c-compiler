@@ -13,6 +13,8 @@ enum class TokenType {
     TOKEN_KEYWORD_RETURN,
     TOKEN_KEYWORD_IF,
     TOKEN_KEYWORD_ELSE,
+
+    // Punctuation
     TOKEN_QUESTION,
     TOKEN_COLON,
 
@@ -38,7 +40,7 @@ enum class TokenType {
     TOKEN_OPERATOR_MODULO,
     TOKEN_OPERATOR_DECREMENT, 
 
-    // NEW: Chapter 4 Operators
+    // Chapter 4 Operators
     TOKEN_OPERATOR_LOGICAL_NEG,   // !
     TOKEN_OPERATOR_LOGICAL_AND,   // &&
     TOKEN_OPERATOR_LOGICAL_OR,    // ||
@@ -52,9 +54,17 @@ enum class TokenType {
     TOKEN_OPERATOR_BITWISE_AND,   // &
     TOKEN_OPERATOR_BITWISE_OR,    // |
 
-    // To handle unknown characters
+    // Chapter 7 additions (ADD HERE ONLY)
+    TOKEN_KEYWORD_DO,
+    TOKEN_KEYWORD_WHILE,
+    TOKEN_KEYWORD_FOR,
+    TOKEN_KEYWORD_BREAK,
+    TOKEN_KEYWORD_CONTINUE,
+
+    // Misc
     TOKEN_ILLEGAL
 };
+
 
 struct Token {
     TokenType type;
