@@ -27,6 +27,7 @@ static tacky::TypeKind type_from_simpletype(SimpleType t)
         case SimpleType::DOUBLE: return tacky::TypeKind::Double;
         case SimpleType::FLOAT:  return tacky::TypeKind::Float;
         case SimpleType::INT:    return tacky::TypeKind::Int;
+        case SimpleType::CHAR:   return tacky::TypeKind::Int; // char treated as int
         default:                 return tacky::TypeKind::Int;
     }
 }

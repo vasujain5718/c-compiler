@@ -69,7 +69,7 @@ private:
     // --- replace the existing is_numeric_type definition with this ---
     bool is_numeric_type(SimpleType t) const
     {
-        return t == SimpleType::INT || t == SimpleType::FLOAT || t == SimpleType::DOUBLE;
+        return t == SimpleType::INT || t == SimpleType::FLOAT || t == SimpleType::DOUBLE|| t == SimpleType::CHAR;
     }
 
     // Convert rules: here permissive; you can make them stricter later.

@@ -5,5 +5,6 @@ enum class SimpleType {
     INT,
     FLOAT,
     DOUBLE,
+    CHAR,   
     UNKNOWN
 };

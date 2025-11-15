@@ -310,132 +310,97 @@ void CodeGenerator::generate_instruction(const tacky::Instruction *tacky_inst, i
         bool use_fp = src1_fp || src2_fp || dst_fp;
 
         // ---------- Floating-point lowering ----------
+        // ---------- Floating-point lowering ----------
+
         if (use_fp)
+
         {
+
+            // --- START HELPER: Load any operand into an XMM register ---
+
+            auto load_operand_to_xmm = [&](unique_ptr<ir::Operand> op, ir::RegType xmm_reg) {
+
+                auto xmm_dest = make_unique<ir::Register>(ir::Reg(xmm_reg));
+
+
+
+                // Case 1: Operand is a Stack variable
+
+                if (auto *s = dynamic_cast<ir::Stack *>(op.get()))
+
+                {
+
+                    if (s->size == 8) {
+
+                        // It's a double -> use movsd
+
+                        ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(move(op), move(xmm_dest)));
+
+                    } else {
+
+                        // It's an int/char -> use cvtsi2sd
+
+                        ir_func->instructions.push_back(make_unique<ir::CvtSI2SDInstruction>(move(op), move(xmm_dest)));
+
+                    }
+
+                    return;
+
+                }
+
+                // Case 2: Operand is an immediate or other register (already float/double)
+
+                // This assumes int immediates are not mixed in FP ops without a var
+
+                // (which is OK, since a = b + 1; would be promoted by semantic pass)
+
+                // We just use MovSD which will load from .rodata pool
+
+                ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(move(op), move(xmm_dest)));
+
+            };
+
+            // --- END HELPER ---
+
+
+
+
+
             // Arithmetic: promote and do FP binary (use ADDSD/SUBSD/MULSD/DIVSD)
+
             if (binary_inst->op == tacky::BinaryOperatorType::Add ||
+
                 binary_inst->op == tacky::BinaryOperatorType::Subtract ||
+
                 binary_inst->op == tacky::BinaryOperatorType::Multiply ||
+
                 binary_inst->op == tacky::BinaryOperatorType::Divide)
+
             {
-
-                // Normalize: left -> %xmm1, right -> %xmm0
-                // src1 -> xmm1
-                if (auto *s = dynamic_cast<ir::Stack *>(src1.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Stack>(s->val, s->size),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1))));
-                }
-                else if (auto *imm = dynamic_cast<ir::Immediate *>(src1.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Immediate>(imm->value),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1))));
-                }
-                else if (auto *r = dynamic_cast<ir::Register *>(src1.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Register>(r->name),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1))));
-                }
-                else
-                {
-                    throw runtime_error("FP lowering: unsupported left operand");
-                }
-
-                // src2 -> xmm0
-                if (auto *s2 = dynamic_cast<ir::Stack *>(src2.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Stack>(s2->val, s2->size),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))));
-                }
-                else if (auto *imm2 = dynamic_cast<ir::Immediate *>(src2.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Immediate>(imm2->value),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))));
-                }
-                else if (auto *r2 = dynamic_cast<ir::Register *>(src2.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Register>(r2->name),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))));
-                }
-                else
-                {
-                    throw runtime_error("FP lowering: unsupported right operand");
-                }
 
                 ir::BinaryType fp_op;
-                if (binary_inst->op == tacky::BinaryOperatorType::Add)
-                    fp_op = ir::BinaryType::ADDSD;
-                else if (binary_inst->op == tacky::BinaryOperatorType::Subtract)
-                    fp_op = ir::BinaryType::SUBSD;
-                else if (binary_inst->op == tacky::BinaryOperatorType::Multiply)
-                    fp_op = ir::BinaryType::MULSD;
-                else
-                    fp_op = ir::BinaryType::DIVSD;
+
+                if (binary_inst->op == tacky::BinaryOperatorType::Add)      fp_op = ir::BinaryType::ADDSD;
+
+                else if (binary_inst->op == tacky::BinaryOperatorType::Subtract) fp_op = ir::BinaryType::SUBSD;
+
+                else if (binary_inst->op == tacky::BinaryOperatorType::Multiply) fp_op = ir::BinaryType::MULSD;
+
+                else                                                     fp_op = ir::BinaryType::DIVSD;
+
+
 
                 if (fp_op == ir::BinaryType::SUBSD || fp_op == ir::BinaryType::DIVSD)
+
                 {
 
-                    // Load src1 (LHS) into %xmm0
+                    // op is %xmm1, %xmm0  (calculates %xmm0 = %xmm0 - %xmm1)
 
-                    if (auto *s = dynamic_cast<ir::Stack *>(src1.get()))
-                    {
+                    // We want src1 - src2, so load src1 -> %xmm0, src2 -> %xmm1
 
-                        ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
+                    load_operand_to_xmm(move(src1), ir::RegType::XMM0);
 
-                            make_unique<ir::Stack>(s->val, s->size),
-
-                            make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))
-
-                                ));
-                    }
-                    else if (auto *imm = dynamic_cast<ir::Immediate *>(src1.get()))
-                    {
-
-                        ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-
-                            make_unique<ir::Immediate>(imm->value),
-
-                            make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))
-
-                                ));
-
-                    } // ... add other cases like src1 is register if needed ...
-
-                    // Load src2 (RHS) into %xmm1
-
-                    if (auto *s2 = dynamic_cast<ir::Stack *>(src2.get()))
-                    {
-
-                        ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-
-                            make_unique<ir::Stack>(s2->val, s2->size),
-
-                            make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1))
-
-                                ));
-                    }
-                    else if (auto *imm2 = dynamic_cast<ir::Immediate *>(src2.get()))
-                    {
-
-                        ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-
-                            make_unique<ir::Immediate>(imm2->value),
-
-                            make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1))
-
-                                ));
-
-                    } // ... add other cases like src2 is register if needed ...
-
-                    // This will be op %xmm1, %xmm0 (e.g., divsd %xmm1, %xmm0)
-
-                    // This correctly computes %xmm0 = %xmm0 / %xmm1 (src1 / src2)
+                    load_operand_to_xmm(move(src2), ir::RegType::XMM1);
 
                     ir_func->instructions.push_back(make_unique<ir::BinaryInstruction>(
 
@@ -445,184 +410,136 @@ void CodeGenerator::generate_instruction(const tacky::Instruction *tacky_inst, i
 
                         make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))
 
-                            ));
-                }
-                else
-                {
-
-                    // This is your ORIGINAL code, which is correct for ADDSD and MULSD
-
-                    // src1 -> xmm1
-
-                    if (auto *s = dynamic_cast<ir::Stack *>(src1.get()))
-                    {
-
-                        ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-
-                            make_unique<ir::Stack>(s->val, s->size),
-
-                            make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1))
-
-                                ));
-                    }
-                    else if (auto *imm = dynamic_cast<ir::Immediate *>(src1.get()))
-                    {
-
-                        ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-
-                            make_unique<ir::Immediate>(imm->value),
-
-                            make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1))
-
-                                ));
-
-                    } // ...
-
-                    // src2 -> xmm0
-
-                    if (auto *s2 = dynamic_cast<ir::Stack *>(src2.get()))
-                    {
-
-                        ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-
-                            make_unique<ir::Stack>(s2->val, s2->size),
-
-                            make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))
-
-                                ));
-                    }
-                    else if (auto *imm2 = dynamic_cast<ir::Immediate *>(src2.get()))
-                    {
-
-                        ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-
-                            make_unique<ir::Immediate>(imm2->value),
-
-                            make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))
-
-                                ));
-
-                    } // ...
-
-                    // op %xmm1, %xmm0 (e.g., addsd %xmm1, %xmm0)
-
-                    // This computes %xmm0 = %xmm0 + %xmm1 (src2 + src1), which is fine.
-
-                    ir_func->instructions.push_back(make_unique<ir::BinaryInstruction>(
-
-                        fp_op,
-
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1)),
-
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))
-
-                            ));
-                }
-                ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                    make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0)),
-                    move(dst) // 'dst' is the original destination operand
                     ));
+
+                }
+
+                else // ADDSD, MULSD
+
+                {
+
+                    // op is %xmm1, %xmm0  (calculates %xmm0 = %xmm0 + %xmm1)
+
+                    // Order doesn't matter, so load src1 -> %xmm0, src2 -> %xmm1
+
+                    load_operand_to_xmm(move(src1), ir::RegType::XMM0);
+
+                    load_operand_to_xmm(move(src2), ir::RegType::XMM1);
+
+                    ir_func->instructions.push_back(make_unique<ir::BinaryInstruction>(
+
+                        fp_op,
+
+                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1)),
+
+                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))
+
+                    ));
+
+                }
+
+                // Store result from %xmm0 into destination
+
+                ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
+
+                    make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0)),
+
+                    move(dst) // 'dst' is the original destination operand
+
+                ));
+
                 return;
+
             }
+
+
 
             // Comparisons / relational ops: normalize and use CmpSDInstruction (ucomisd)
+
             if (binary_inst->op == tacky::BinaryOperatorType::Equal ||
+
                 binary_inst->op == tacky::BinaryOperatorType::NotEqual ||
+
                 binary_inst->op == tacky::BinaryOperatorType::LessThan ||
+
                 binary_inst->op == tacky::BinaryOperatorType::LessOrEqual ||
+
                 binary_inst->op == tacky::BinaryOperatorType::GreaterThan ||
+
                 binary_inst->op == tacky::BinaryOperatorType::GreaterOrEqual)
+
             {
 
-                // left -> xmm1
-                if (auto *s = dynamic_cast<ir::Stack *>(src1.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Stack>(s->val, s->size),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1))));
-                }
-                else if (auto *imm = dynamic_cast<ir::Immediate *>(src1.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Immediate>(imm->value),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1))));
-                }
-                else if (auto *r = dynamic_cast<ir::Register *>(src1.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Register>(r->name),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1))));
-                }
-                else
-                {
-                    throw runtime_error("FP compare: unsupported left operand");
-                }
+                // ucomisd %xmm0, %xmm1 (compares src2, src1)
 
-                // right -> xmm0  (important: not xmm1)
-                if (auto *s2 = dynamic_cast<ir::Stack *>(src2.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Stack>(s2->val, s2->size),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))));
-                }
-                else if (auto *imm2 = dynamic_cast<ir::Immediate *>(src2.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Immediate>(imm2->value),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))));
-                }
-                else if (auto *r2 = dynamic_cast<ir::Register *>(src2.get()))
-                {
-                    ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(
-                        make_unique<ir::Register>(r2->name),
-                        make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))));
-                }
-                else
-                {
-                    throw runtime_error("FP compare: unsupported right operand");
-                }
+                // Load src1 -> %xmm1
 
-                // emit FP compare (ucomisd xmm1, xmm0)
+                load_operand_to_xmm(move(src1), ir::RegType::XMM0);
+
+                // Load src2 -> %xmm0
+
+                load_operand_to_xmm(move(src2), ir::RegType::XMM1);
+
+
+
+                // emit FP compare (ucomisd xmm0, xmm1)
+
                 ir_func->instructions.push_back(make_unique<ir::CmpSDInstruction>(
-                    make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1)),
-                    make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0))));
+
+                    make_unique<ir::Register>(ir::Reg(ir::RegType::XMM0)), // src2
+
+                    make_unique<ir::Register>(ir::Reg(ir::RegType::XMM1))  // src1
+
+                ));
+
+
 
                 // dst = 0
+
                 ir_func->instructions.push_back(make_unique<ir::MovInstruction>(make_unique<ir::Immediate>("0"), move(dst_clone1)));
 
+
+
                 // ZERO r10d BEFORE setcc, setcc into r10b, move r10 -> dst
+
                 ir_func->instructions.push_back(make_unique<ir::MovInstruction>(make_unique<ir::Immediate>("0"),
+
                                                                                 make_unique<ir::Register>(ir::Reg(ir::RegType::R10))));
+
                 ir::CondCode cond;
+
                 switch (binary_inst->op)
+
                 {
-                case tacky::BinaryOperatorType::Equal:
-                    cond = ir::CondCode::E;
-                    break;
-                case tacky::BinaryOperatorType::NotEqual:
-                    cond = ir::CondCode::NE;
-                    break;
-                case tacky::BinaryOperatorType::LessThan:
-                    cond = ir::CondCode::B;
-                    break;
-                case tacky::BinaryOperatorType::LessOrEqual:
-                    cond = ir::CondCode::BE;
-                    break;
-                case tacky::BinaryOperatorType::GreaterThan:
-                    cond = ir::CondCode::A;
-                    break;
-                case tacky::BinaryOperatorType::GreaterOrEqual:
-                    cond = ir::CondCode::AE;
-                    break;
-                default:
-                    throw runtime_error("Unknown relational op");
+
+                case tacky::BinaryOperatorType::Equal:        cond = ir::CondCode::E;  break;
+
+                case tacky::BinaryOperatorType::NotEqual:      cond = ir::CondCode::NE; break;
+
+                case tacky::BinaryOperatorType::LessThan:       cond = ir::CondCode::B;  break; // unsigned/below for floats
+
+                case tacky::BinaryOperatorType::LessOrEqual:    cond = ir::CondCode::BE; break; // unsigned/below-equal
+
+                case tacky::BinaryOperatorType::GreaterThan:     cond = ir::CondCode::A;  break; // unsigned/above
+
+                case tacky::BinaryOperatorType::GreaterOrEqual: cond = ir::CondCode::AE; break; // unsigned/above-equal
+
+                default: throw runtime_error("Unknown relational op");
+
                 }
+
                 ir_func->instructions.push_back(make_unique<ir::SetCCInstruction>(cond, make_unique<ir::Register>(ir::Reg(ir::RegType::R10))));
+
                 ir_func->instructions.push_back(make_unique<ir::MovInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::R10)), move(dst_clone2)));
+
                 return;
+
             }
 
+
+
             throw runtime_error("Unsupported FP binary operator in lowering");
+
         } // end FP path
 
         // ---------- Integer / generic path (unchanged) ----------
@@ -784,94 +701,157 @@ void CodeGenerator::generate_instruction(const tacky::Instruction *tacky_inst, i
     // --- Copy ---
     // In codegen.cpp, replace the tacky::CopyInstruction block (lines 376-393)
 
+    // --- Copy ---
+
     if (auto *copy_inst = dynamic_cast<const tacky::CopyInstruction *>(tacky_inst))
+
     {
 
         auto src = translate_val(copy_inst->src.get());
 
         auto dst = translate_val(copy_inst->dst.get());
 
+
+
         auto *src_is_stack = dynamic_cast<ir::Stack *>(src.get());
 
         auto *dst_is_stack = dynamic_cast<ir::Stack *>(dst.get());
 
-        // --- START FIX ---
+        auto *src_is_imm = dynamic_cast<ir::Immediate *>(src.get());
 
-        // Check if this is an 8-byte (double) copy
 
-        bool is_double_copy = false;
+
+        // --- START NEW LOGIC ---
+
+
+
+        // Case 1: Destination is a double (size 8)
 
         if (dst_is_stack && dst_is_stack->size == 8)
-            is_double_copy = true;
 
-        if (src_is_stack && src_is_stack->size == 8)
-            is_double_copy = true;
-
-        if (auto *imm = dynamic_cast<ir::Immediate *>(src.get()))
         {
 
-            if (imm->value.find('.') != std::string::npos ||
+            // Case 1a: Source is also a double (size 8)
 
-                imm->value.find('e') != std::string::npos ||
-
-                imm->value.find('E') != std::string::npos)
+            if (src_is_stack && src_is_stack->size == 8)
 
             {
 
-                is_double_copy = true;
-            }
-        }
-
-        if (is_double_copy)
-        {
-
-            // Emit MovSD (movsd) for doubles
-
-            if (src_is_stack && dst_is_stack)
-            {
-
-                // Use a scratch XMM register (like %xmm7)
+                // double-to-double copy (mem-to-mem)
 
                 auto reg_xmm_tmp = make_unique<ir::Register>(ir::Reg(ir::RegType::XMM7));
 
                 ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(move(src), move(reg_xmm_tmp)));
 
                 ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::XMM7)), move(dst)));
+
             }
-            else
+
+            // Case 1b: Source is an int/char (size 4)
+
+            else if (src_is_stack && src_is_stack->size == 4)
+
             {
 
-                // imm->mem, reg->mem, mem->reg
+                // int-to-double copy (mem-to-mem)
+
+                // We MUST use cvtsi2sd
+
+                auto reg_xmm_tmp = make_unique<ir::Register>(ir::Reg(ir::RegType::XMM7));
+
+ 	            ir_func->instructions.push_back(make_unique<ir::CvtSI2SDInstruction>(move(src), move(reg_xmm_tmp)));
+
+   	          ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::XMM7)), move(dst)));
+
+            }
+
+            // Case 1c: Source is a float-like immediate
+
+            else if (src_is_imm && (src_is_imm->value.find('.') != std::string::npos ||
+
+                                    src_is_imm->value.find('e') != std::string::npos ||
+
+                                    src_is_imm->value.find('E') != std::string::npos))
+
+            {
+
+                // imm(float) -> mem(double)
 
                 ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(move(src), move(dst)));
+
             }
+
+            // Case 1d: Source is an int immediate (e.g. double d = 10;)
+
+            else if (src_is_imm)
+
+            {
+
+                // imm(int) -> mem(double)
+
+                // We must load int to a temp reg, then convert
+
+                auto reg_r10_tmp = make_unique<ir::Register>(ir::Reg(ir::RegType::R10));
+
+                auto reg_xmm_tmp = make_unique<ir::Register>(ir::Reg(ir::RegType::XMM7));
+
+                ir_func->instructions.push_back(make_unique<ir::MovInstruction>(move(src), move(reg_r10_tmp)));
+
+   	          ir_func->instructions.push_back(make_unique<ir::CvtSI2SDInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::R10)), move(reg_xmm_tmp)));
+
+   	          ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::XMM7)), move(dst)));
+
+            }
+
+            else 
+
+            {
+
+                // This handles reg->mem, which is fine
+
+                ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(move(src), move(dst)));
+
+            }
+
         }
+
+        // Case 2: Destination is an int/char (size 4)
+
         else
+
         {
 
-            // --- END FIX ---
+       	    // This is the original integer-copy logic, which is correct
 
-            // This is your original code, which is correct for integers (movl)
+       	    // (e.g., int-to-int, or char-to-int)
 
             if (src_is_stack && dst_is_stack)
+
             {
 
                 auto reg_r10_src = make_unique<ir::Register>(ir::Reg(ir::RegType::R10));
 
-                ir_func->instructions.push_back(make_unique<ir::MovInstruction>(move(src), move(reg_r10_src)));
+   	          ir_func->instructions.push_back(make_unique<ir::MovInstruction>(move(src), move(reg_r10_src)));
 
-                ir_func->instructions.push_back(make_unique<ir::MovInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::R10)), move(dst)));
+   	          ir_func->instructions.push_back(make_unique<ir::MovInstruction>(make_unique<ir::Register>(ir::Reg(ir::RegType::R10)), move(dst)));
+
             }
+
             else
+
             {
 
                 ir_func->instructions.push_back(make_unique<ir::MovInstruction>(move(src), move(dst)));
+
             }
 
-        } // end if (is_double_copy)
+        }
 
         return;
+
     }
+
+    // --- END NEW LOGIC ---
     // --- Jumps / branches / labels ---
     if (auto *jmp_inst = dynamic_cast<const tacky::JumpInstruction *>(tacky_inst))
     {

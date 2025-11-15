@@ -321,6 +321,27 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
 
         throw runtime_error("Emitter Error: Unsupported movsd operand pattern");
     }
+    // Add this block inside AssemblyEmitter::emit_instruction
+
+    else if (auto *cvtsi_inst = dynamic_cast<const ir::CvtSI2SDInstruction *>(inst))
+
+    {
+
+        // cvtsi2sd <mem32>, <xmm_reg>
+
+        // cvtsi2sd <reg32>, <xmm_reg>
+
+        out << "    cvtsi2sd ";
+
+        emit_operand(cvtsi_inst->src.get());
+
+        out << ", ";
+
+        emit_operand(cvtsi_inst->dest.get());
+
+        out << endl;
+
+    }
     else if (auto *mov_inst = dynamic_cast<const ir::MovInstruction *>(inst))
     {
         // --- MOV (integer / 32-bit movl semantics) ---

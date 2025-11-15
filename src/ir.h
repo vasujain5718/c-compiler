@@ -136,6 +136,24 @@ struct BinaryInstruction : public Instruction {
         : op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
 };
 
+// Add this struct definition in ir.h
+
+
+
+// Integer (stack) to Double (XMM register) conversion
+
+struct CvtSI2SDInstruction : public Instruction {
+
+    std::unique_ptr<Operand> src;  // Source (must be 4-byte int, e.g., Stack(offset, 4))
+
+    std::unique_ptr<Operand> dest; // Destination (must be XMM register)
+
+    CvtSI2SDInstruction(std::unique_ptr<Operand> src, std::unique_ptr<Operand> dest)
+
+        : src(std::move(src)), dest(std::move(dest)) {}
+
+};
+
 struct IdivInstruction : public Instruction {
     std::unique_ptr<Operand> divisor;
     explicit IdivInstruction(std::unique_ptr<Operand> divisor) : divisor(std::move(divisor)) {}

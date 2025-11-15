@@ -15,7 +15,7 @@ enum class TokenType {
     TOKEN_KEYWORD_ELSE,
     TOKEN_KEYWORD_FLOAT,
     TOKEN_KEYWORD_DOUBLE,
-
+    TOKEN_KEYWORD_CHAR,
     // Punctuation
     TOKEN_QUESTION,
     TOKEN_COLON,
