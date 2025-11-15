@@ -1,21 +1,51 @@
+// semantic_analysis.cpp
 #include "semantic_analysis.h"
+#include "type.h"          // SimpleType enum
+#include "ast.h"            // AST node types (ConstantExprAST, etc.)
 #include <stdexcept>
 #include <utility>
+#include <algorithm>
+#include <cctype>
+#include <unordered_map>
 
 using std::runtime_error;
 using std::string;
 
-// ===== Public =====
+// ---------- Helpers for SimpleType <-> string (for diagnostics) ----------
+static std::string simpletype_to_string(SimpleType t) {
+    switch (t) {
+        case SimpleType::INT:    return "int";
+        case SimpleType::FLOAT:  return "float";
+        case SimpleType::DOUBLE: return "double";
+        case SimpleType::VOID:   return "void";
+        default:                 return "unknown";
+    }
+}
+
+static bool is_numeric_type(SimpleType t) {
+    return t == SimpleType::INT || t == SimpleType::FLOAT || t == SimpleType::DOUBLE;
+}
+
+// Allow implicit widening only: int -> float/double, float -> double
+static bool implicit_widening_allowed(SimpleType from, SimpleType to) {
+    if (from == to) return true;
+    if (from == SimpleType::INT && (to == SimpleType::FLOAT || to == SimpleType::DOUBLE)) return true;
+    if (from == SimpleType::FLOAT && to == SimpleType::DOUBLE) return true;
+    return false;
+}
+
+// ---------- SemanticAnalysis methods ----------
 
 void SemanticAnalysis::resolve(FunctionAST* function) {
     unique_counter = 0;
     loop_label_counter = 0;
     loop_id_of_stmt_.clear();
     enclosing_id_of_bc_.clear();
+    expr_type_.clear();
 
-    VarMap varmap; // empty map at function scope
+    VarMap varmap; // empty map at function (top) scope
 
-    // 1) Variable/name resolution
+    // 1) Variable/name resolution and basic typing checks
     resolve_block(function->Body, varmap);
 
     // 2) Loop annotation (separate pass)
@@ -44,6 +74,11 @@ SemanticAnalysis::VarMap SemanticAnalysis::copy_variable_map(const VarMap& m) {
         kv.second.from_current_block = false; // entering a new block
     }
     return copy;
+}
+
+// NOTE: replace the old convertible that used strings; now use SimpleType
+bool SemanticAnalysis::convertible(SimpleType from, SimpleType to) const {
+    return implicit_widening_allowed(from, to);
 }
 
 // ===== Variable resolution =====
@@ -76,24 +111,41 @@ void SemanticAnalysis::resolve_declaration(DeclarationAST* decl, VarMap& varmap)
         throw runtime_error("Semantic Error: Duplicate declaration of variable '" + decl->VarName + "' in the same block.");
     }
 
+    // Validate declared type (DeclType is now SimpleType)
+    SimpleType declared_type = decl->DeclType;
+    if (!is_numeric_type(declared_type)) {
+        throw runtime_error("Semantic Error: Unsupported declaration type '" + simpletype_to_string(declared_type) + "' for variable '" + decl->VarName + "'.");
+    }
+
     // introduce name first so initializer can see it
     std::string unique_name = make_unique_name(decl->VarName);
-    varmap[decl->VarName] = MapEntry{unique_name, /*from_current_block=*/true};
+    // MapEntry is assumed to hold SimpleType decl_type (update header accordingly)
+    varmap[decl->VarName] = MapEntry{unique_name, /*from_current_block=*/true, declared_type};
 
     // rewrite declaration name to the unique one
     decl->VarName = unique_name;
 
-    if (decl->InitExpr) resolve_expression(decl->InitExpr.get(), varmap);
+    // If initializer exists, resolve and type-check it
+    if (decl->InitExpr) {
+        resolve_expression(decl->InitExpr.get(), varmap);
+        SimpleType rhs_t = infer_expr_type(decl->InitExpr.get(), varmap);
+        // check convertible (implicit widening)
+        if (!convertible(rhs_t, declared_type)) {
+            throw runtime_error("Semantic Error: Cannot initialize variable '" + decl->VarName + "' of type '" + simpletype_to_string(declared_type) +
+                                "' with expression of type '" + simpletype_to_string(rhs_t) + "'.");
+        }
+    }
 }
 
 void SemanticAnalysis::resolve_statement(StatementAST* stmt, VarMap& varmap) {
     if (auto* ret_stmt = dynamic_cast<ReturnStatementAST*>(stmt)) {
-        resolve_expression(ret_stmt->Expression.get(), varmap);
+        if (ret_stmt->Expression) resolve_expression(ret_stmt->Expression.get(), varmap);
+        // Return type checking against the function's declared return type can be done at a higher level if desired.
         return;
     }
 
     if (auto* expr_stmt = dynamic_cast<ExpressionStatementAST*>(stmt)) {
-        resolve_expression(expr_stmt->Expression.get(), varmap);
+        if (expr_stmt->Expression) resolve_expression(expr_stmt->Expression.get(), varmap);
         return;
     }
 
@@ -103,6 +155,11 @@ void SemanticAnalysis::resolve_statement(StatementAST* stmt, VarMap& varmap) {
 
     if (auto* if_stmt = dynamic_cast<IfStatementAST*>(stmt)) {
         resolve_expression(if_stmt->Condition.get(), varmap);
+        // Condition should be numeric (int/float/double)
+        SimpleType cond_t = infer_expr_type(if_stmt->Condition.get(), varmap);
+        if (!is_numeric_type(cond_t)) {
+            throw runtime_error("Semantic Error: If condition must be numeric (got '" + simpletype_to_string(cond_t) + "').");
+        }
         resolve_statement(if_stmt->ThenBranch.get(), varmap);
         if (if_stmt->ElseBranch) resolve_statement(if_stmt->ElseBranch.get(), varmap);
         return;
@@ -115,31 +172,45 @@ void SemanticAnalysis::resolve_statement(StatementAST* stmt, VarMap& varmap) {
         return;
     }
 
-    // ----- NEW: while -----
+    // while
     if (auto* w = dynamic_cast<WhileStatementAST*>(stmt)) {
         resolve_expression(w->Condition.get(), varmap);
+        SimpleType cond_t = infer_expr_type(w->Condition.get(), varmap);
+        if (!is_numeric_type(cond_t)) {
+            throw runtime_error("Semantic Error: While condition must be numeric (got '" + simpletype_to_string(cond_t) + "').");
+        }
         resolve_statement(w->Body.get(), varmap);
         return;
     }
 
-    // ----- NEW: do-while -----
+    // do-while
     if (auto* dw = dynamic_cast<DoWhileStatementAST*>(stmt)) {
         resolve_statement(dw->Body.get(), varmap);
         resolve_expression(dw->Condition.get(), varmap);
+        SimpleType cond_t = infer_expr_type(dw->Condition.get(), varmap);
+        if (!is_numeric_type(cond_t)) {
+            throw runtime_error("Semantic Error: Do-while condition must be numeric (got '" + simpletype_to_string(cond_t) + "').");
+        }
         return;
     }
 
-    // ----- NEW: for (with header scope) -----
+    // for (with header scope)
     if (auto* f = dynamic_cast<ForStatementAST*>(stmt)) {
         VarMap inner = copy_variable_map(varmap);   // header+body scope
         resolve_for_init(f->Init.get(), inner);     // may declare
         resolve_optional_expr(f->Condition.get(), inner);
+        if (f->Condition) {
+            SimpleType cond_t = infer_expr_type(f->Condition.get(), inner);
+            if (!is_numeric_type(cond_t)) {
+                throw runtime_error("Semantic Error: For condition must be numeric (got '" + simpletype_to_string(cond_t) + "').");
+            }
+        }
         resolve_optional_expr(f->Increment.get(), inner);
         resolve_statement(f->Body.get(), inner);
         return;
     }
 
-    // ----- NEW: break/continue (no children to resolve) -----
+    // break/continue (no children to resolve)
     if (dynamic_cast<BreakStatementAST*>(stmt))   return;
     if (dynamic_cast<ContinueStatementAST*>(stmt)) return;
 
@@ -154,28 +225,45 @@ void SemanticAnalysis::resolve_expression(ExprAST* expr, VarMap& varmap) {
         if (it == varmap.end()) {
             throw runtime_error("Semantic Error: Undeclared variable '" + var_expr->Name + "'.");
         }
-        var_expr->Name = it->second.unique_name;
+        // rewrite variable name to the unique one and record its type
+        std::string resolved_name = it->second.unique_name;
+        SimpleType var_type = it->second.decl_type;
+        var_expr->Name = resolved_name;
+        expr_type_[expr] = var_type;
         return;
     }
 
     if (auto* assign_expr = dynamic_cast<AssignmentExprAST*>(expr)) {
+        // LHS must be variable
         auto* lhs_var = dynamic_cast<VarExprAST*>(assign_expr->LHS.get());
         if (!lhs_var) {
             throw runtime_error("Semantic Error: Invalid lvalue in assignment. Left side must be a variable.");
         }
         resolve_expression(assign_expr->LHS.get(), varmap);
         resolve_expression(assign_expr->RHS.get(), varmap);
+
+        // type checking
+        SimpleType lhs_t = infer_expr_type(assign_expr->LHS.get(), varmap);
+        SimpleType rhs_t = infer_expr_type(assign_expr->RHS.get(), varmap);
+        if (!convertible(rhs_t, lhs_t)) {
+            throw runtime_error("Semantic Error: Cannot assign expression of type '" + simpletype_to_string(rhs_t) +
+                                "' to variable of type '" + simpletype_to_string(lhs_t) + "'.");
+        }
+        expr_type_[expr] = lhs_t;
         return;
     }
 
     if (auto* unary_expr = dynamic_cast<UnaryExprAST*>(expr)) {
         resolve_expression(unary_expr->Operand.get(), varmap);
+        // Infer later in infer_expr_type (cached)
+        expr_type_[expr] = infer_expr_type(expr, varmap);
         return;
     }
 
     if (auto* binary_expr = dynamic_cast<BinaryExprAST*>(expr)) {
         resolve_expression(binary_expr->LHS.get(), varmap);
         resolve_expression(binary_expr->RHS.get(), varmap);
+        expr_type_[expr] = infer_expr_type(expr, varmap);
         return;
     }
 
@@ -183,10 +271,17 @@ void SemanticAnalysis::resolve_expression(ExprAST* expr, VarMap& varmap) {
         resolve_expression(cond->Condition.get(), varmap);
         resolve_expression(cond->ThenExpr.get(), varmap);
         resolve_expression(cond->ElseExpr.get(), varmap);
+        expr_type_[expr] = infer_expr_type(expr, varmap);
         return;
     }
 
-    // ConstantExprAST or other leafs: no-op
+    if (auto* c = dynamic_cast<ConstantExprAST*>(expr)) {
+        // constant leaf: infer type now
+        expr_type_[expr] = infer_expr_type(expr, varmap);
+        return;
+    }
+
+    // other leafs: no-op
 }
 
 void SemanticAnalysis::resolve_for_init(ForInitAST* init, VarMap& varmap) {
@@ -205,6 +300,154 @@ void SemanticAnalysis::resolve_for_init(ForInitAST* init, VarMap& varmap) {
 
 void SemanticAnalysis::resolve_optional_expr(ExprAST* maybe, VarMap& varmap) {
     if (maybe) resolve_expression(maybe, varmap);
+}
+
+// ===== Expression type inference implementation =====
+
+static bool str_contains_any(const std::string& s, const std::string& chars) {
+    return std::any_of(s.begin(), s.end(), [&](char c){ return chars.find(c) != std::string::npos; });
+}
+
+SimpleType SemanticAnalysis::infer_expr_type(ExprAST* expr, const VarMap& varmap) {
+    if (!expr) return SimpleType::UNKNOWN;
+
+    // Use cached result if present
+    auto it_cache = expr_type_.find(expr);
+    if (it_cache != expr_type_.end()) return it_cache->second;
+
+    // Constant
+    if (auto* c = dynamic_cast<ConstantExprAST*>(expr)) {
+        // If ConstantExprAST had metadata on literal type, prefer that.
+        // In your AST currently ConstantExprAST stores the string; we'll infer using text if no explicit literal_type.
+        // If you later add literal_type to ConstantExprAST, prefer it here.
+        const std::string& lit = c->Val;
+        if (str_contains_any(lit, ".eE")) {
+            expr_type_[expr] = SimpleType::DOUBLE;
+            return SimpleType::DOUBLE;
+        } else {
+            expr_type_[expr] = SimpleType::INT;
+            return SimpleType::INT;
+        }
+    }
+
+    // Variable
+    if (auto* v = dynamic_cast<VarExprAST*>(expr)) {
+        auto it = expr_type_.find(v);
+        if (it != expr_type_.end()) {
+            return it->second;
+        }
+        // fallback: look up in varmap by unique_name
+        for (const auto& kv : varmap) {
+            if (kv.second.unique_name == v->Name) {
+                expr_type_[expr] = kv.second.decl_type;
+                return kv.second.decl_type;
+            }
+        }
+        throw runtime_error("Semantic Error: Unknown variable when inferring type: '" + v->Name + "'.");
+    }
+
+    // Unary
+    if (auto* u = dynamic_cast<UnaryExprAST*>(expr)) {
+        std::string op = u->Op.value;
+        SimpleType operand_t = infer_expr_type(u->Operand.get(), varmap);
+        if (op == "-" ) {
+            if (!is_numeric_type(operand_t)) throw runtime_error("Semantic Error: Unary '-' applied to non-numeric type '" + simpletype_to_string(operand_t) + "'.");
+            expr_type_[expr] = operand_t;
+            return operand_t;
+        } else if (op == "!") {
+            // logical negation -> int
+            expr_type_[expr] = SimpleType::INT;
+            return SimpleType::INT;
+        } else if (op == "~") {
+            if (operand_t != SimpleType::INT) throw runtime_error("Semantic Error: Bitwise complement '~' requires integer operand.");
+            expr_type_[expr] = SimpleType::INT;
+            return SimpleType::INT;
+        }
+        // default
+        expr_type_[expr] = operand_t;
+        return operand_t;
+    }
+
+    // Binary
+    if (auto* b = dynamic_cast<BinaryExprAST*>(expr)) {
+        std::string op = b->Op.value;
+        SimpleType lhs_t = infer_expr_type(b->LHS.get(), varmap);
+        SimpleType rhs_t = infer_expr_type(b->RHS.get(), varmap);
+
+        // Arithmetic ops
+        if (op == "+" || op == "-" || op == "*" || op == "/") {
+            if (!is_numeric_type(lhs_t) || !is_numeric_type(rhs_t))
+                throw runtime_error("Semantic Error: Arithmetic operator '" + op + "' applied to non-numeric operands.");
+            // Determine promotion: INT < FLOAT < DOUBLE
+            if (lhs_t == SimpleType::DOUBLE || rhs_t == SimpleType::DOUBLE) {
+                expr_type_[expr] = SimpleType::DOUBLE; // promote to double
+                return SimpleType::DOUBLE;
+            }
+            if (lhs_t == SimpleType::FLOAT || rhs_t == SimpleType::FLOAT) {
+                expr_type_[expr] = SimpleType::FLOAT; // promote to float
+                return SimpleType::FLOAT;
+            }
+            expr_type_[expr] = SimpleType::INT;
+            return SimpleType::INT;
+        }
+
+        if (op == "%") {
+            if (lhs_t != SimpleType::INT || rhs_t != SimpleType::INT)
+                throw runtime_error("Semantic Error: Modulo operator '%' requires integer operands.");
+            expr_type_[expr] = SimpleType::INT;
+            return SimpleType::INT;
+        }
+
+        // Bitwise ops (|, &, ^) - only integers
+        if (op == "|" || op == "&") {
+            if (lhs_t != SimpleType::INT || rhs_t != SimpleType::INT)
+                throw runtime_error("Semantic Error: Bitwise operator '" + op + "' requires integer operands.");
+            expr_type_[expr] = SimpleType::INT;
+            return SimpleType::INT;
+        }
+
+        // Comparisons and equality -> produce int
+        if (op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=") {
+            if (!is_numeric_type(lhs_t) || !is_numeric_type(rhs_t))
+                throw runtime_error("Semantic Error: Comparison operator '" + op + "' applied to non-numeric operands.");
+            expr_type_[expr] = SimpleType::INT;
+            return SimpleType::INT;
+        }
+
+        // Logical && || -> require numeric or boolean-ish -> produce int
+        if (op == "&&" || op == "||") {
+            if (!is_numeric_type(lhs_t) || !is_numeric_type(rhs_t))
+                throw runtime_error("Semantic Error: Logical operator '" + op + "' applied to non-numeric operands.");
+            expr_type_[expr] = SimpleType::INT;
+            return SimpleType::INT;
+        }
+
+        // Fallback
+        throw runtime_error("Semantic Error: Unsupported binary operator '" + op + "' in type inference.");
+    }
+
+    // Conditional expr ?: -> unify then/else
+    if (auto* c = dynamic_cast<ConditionalExprAST*>(expr)) {
+        SimpleType then_t = infer_expr_type(c->ThenExpr.get(), varmap);
+        SimpleType else_t = infer_expr_type(c->ElseExpr.get(), varmap);
+        if (then_t == else_t) {
+            expr_type_[expr] = then_t;
+            return then_t;
+        }
+        // promote to highest precision: DOUBLE > FLOAT > INT
+        if (then_t == SimpleType::DOUBLE || else_t == SimpleType::DOUBLE) {
+            expr_type_[expr] = SimpleType::DOUBLE;
+            return SimpleType::DOUBLE;
+        }
+        if (then_t == SimpleType::FLOAT || else_t == SimpleType::FLOAT) {
+            expr_type_[expr] = SimpleType::FLOAT;
+            return SimpleType::FLOAT;
+        }
+        expr_type_[expr] = SimpleType::INT;
+        return SimpleType::INT;
+    }
+
+    throw runtime_error("Semantic Error: Could not infer type for expression node.");
 }
 
 // ===== Loop annotation pass =====

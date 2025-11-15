@@ -133,7 +133,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    fs::remove(asm_path);
+    // fs::remove(asm_path);
     
     return 0;
 }

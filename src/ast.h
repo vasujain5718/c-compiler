@@ -6,7 +6,7 @@
 #include <string>
 #include <utility>
 #include <vector>
-
+#include "type.h"  // SimpleType enum
 // ---------- Forward declarations (needed before unique_ptr<T> usage) ----------
 struct ExprAST;
 struct DeclarationAST;
@@ -38,13 +38,19 @@ struct ExprAST {
 
 // ---------- Expression Nodes (as per ASDL) ----------
 struct ConstantExprAST : ExprAST {
-    std::string Val; // keep as string for now
-    explicit ConstantExprAST(std::string val) : Val(std::move(val)) {}
+    std::string Val;          // the literal text as written (e.g., "1", "3.14", "1e-3")
+    SimpleType literal_type;  // optional: explicit literal type if known (INT/FLOAT/DOUBLE)
+    ConstantExprAST(std::string val, SimpleType t = SimpleType::UNKNOWN)
+        : Val(std::move(val)), literal_type(t) {}
 };
+
 
 struct VarExprAST : ExprAST {
     std::string Name;
-    explicit VarExprAST(std::string name) : Name(std::move(name)) {}
+    SimpleType literal_type;
+    explicit VarExprAST(std::string name, SimpleType t = SimpleType::UNKNOWN)
+    : Name(std::move(name)), literal_type(std::move(t)) {}
+
 };
 
 struct UnaryExprAST : ExprAST {
@@ -173,18 +179,20 @@ struct CompoundStatementAST : StatementAST {
 
 // ---------- Declaration Node (also inherits from BlockItemAST) ----------
 struct DeclarationAST : BlockItemAST {
+    SimpleType DeclType; // e.g., "int", "float", "double"
     std::string VarName;
     std::unique_ptr<ExprAST> InitExpr; // Can be nullptr
-    DeclarationAST(std::string var_name, std::unique_ptr<ExprAST> init_expr = nullptr)
-        : VarName(std::move(var_name)), InitExpr(std::move(init_expr)) {}
+    DeclarationAST(SimpleType decl_type, std::string var_name, std::unique_ptr<ExprAST> init_expr = nullptr)
+        : DeclType(std::move(decl_type)), VarName(std::move(var_name)), InitExpr(std::move(init_expr)) {}
 };
 
 // ---------- Top Level ----------
 struct FunctionAST {
+    SimpleType ReturnType; // e.g., "int", "void", "float", "double"
     std::string Name;
     std::vector<std::unique_ptr<BlockItemAST>> Body; // list of BlockItemASTs
-    FunctionAST(std::string name, std::vector<std::unique_ptr<BlockItemAST>> body)
-        : Name(std::move(name)), Body(std::move(body)) {}
+    FunctionAST(SimpleType return_type, std::string name, std::vector<std::unique_ptr<BlockItemAST>> body)
+        : ReturnType(std::move(return_type)), Name(std::move(name)), Body(std::move(body)) {}
 };
 
 #endif // AST_H

@@ -19,7 +19,12 @@ enum class UnaryType {
 enum class BinaryType {
     ADD,
     SUB,
-    MUL
+    MUL,
+    // integer-only or generic integer ops above; floating variants below:
+    ADDSD,
+    SUBSD,
+    MULSD,
+    DIVSD
 };
 
 // NEW: Condition codes for jumps and sets
@@ -29,14 +34,28 @@ enum class CondCode {
     L,  // Less Than
     LE, // Less Than or Equal
     G,  // Greater Than
-    GE  // Greater Than or Equal
+    GE,
+    A,
+    AE,
+    B,
+    BE  // Greater Than or Equal
+
 };
 
 enum class RegType {
     AX,
     DX,
     R10,
-    R11
+    R11,
+    // XMM registers for floating point
+    XMM0,
+    XMM1,
+    XMM2,
+    XMM3,
+    XMM4,
+    XMM5,
+    XMM6,
+    XMM7
 };
 
 // --- Register Struct ---
@@ -47,7 +66,7 @@ struct Reg {
 };
 
 // --- Operands (matches ASDL 'operand = ...') ---
-
+// Note: Stack carries optional size (bytes) for emitter to select movsd vs movl.
 struct Operand {
     virtual ~Operand() = default;
 };
@@ -68,8 +87,9 @@ struct Pseudo : public Operand {
 };
 
 struct Stack : public Operand {
-    int val; 
-    explicit Stack(int val) : val(val) {} 
+    int val;
+    int size; // bytes (4 for int, 8 for double)
+    explicit Stack(int val, int size = 4) : val(val), size(size) {}
 };
 
 // --- Instructions (matches ASDL 'instruction = ...') ---
@@ -81,12 +101,23 @@ struct Instruction {
 struct MovInstruction : public Instruction {
     std::unique_ptr<Operand> src;
     std::unique_ptr<Operand> dest;
+    // integer/int32 'movl' semantics
     MovInstruction(std::unique_ptr<Operand> src, std::unique_ptr<Operand> dest) 
+        : src(std::move(src)), dest(std::move(dest)) {}
+};
+
+// Floating move (movsd) with 64-bit double semantics.
+// src/dest may be Register(XMM)/Stack/Memory/Immediate (Immediate -> load constant required)
+struct MovSDInstruction : public Instruction {
+    std::unique_ptr<Operand> src;
+    std::unique_ptr<Operand> dest;
+    MovSDInstruction(std::unique_ptr<Operand> src, std::unique_ptr<Operand> dest)
         : src(std::move(src)), dest(std::move(dest)) {}
 };
 
 struct RetInstruction : public Instruction {};
 
+// Integer unary
 struct UnaryInstruction : public Instruction {
     UnaryType op; 
     std::unique_ptr<Operand> operand; 
@@ -95,6 +126,7 @@ struct UnaryInstruction : public Instruction {
         : op(op), operand(std::move(operand)) {}
 };
 
+// BinaryInstruction carries BinaryType; it can represent both integer and FP binary ops
 struct BinaryInstruction : public Instruction {
     BinaryType op;
     std::unique_ptr<Operand> lhs;
@@ -111,12 +143,13 @@ struct IdivInstruction : public Instruction {
 
 struct CDQInstruction : public Instruction {};
 
+// Stack allocation
 struct AllocateStackInstruction : public Instruction {
     int n;
     explicit AllocateStackInstruction(int n) : n(n) {}
 }; 
 
-// --- NEW INSTRUCTIONS for Chapter 4 ---
+// --- NEW INSTRUCTIONS for Chapter 4 (already present) ---
 
 struct CmpInstruction : public Instruction {
     std::unique_ptr<Operand> lhs;
@@ -139,7 +172,7 @@ struct JmpCCInstruction : public Instruction {
 
 struct SetCCInstruction : public Instruction {
     CondCode cond;
-    std::unique_ptr<Operand> dest; // Destination must be a byte register
+    std::unique_ptr<Operand> dest; // Destination must be a byte-capable register operand (emitter ensures)
     explicit SetCCInstruction(CondCode cond, std::unique_ptr<Operand> dest)
         : cond(cond), dest(std::move(dest)) {}
 };
@@ -147,6 +180,15 @@ struct SetCCInstruction : public Instruction {
 struct LabelInstruction : public Instruction {
     std::string name;
     explicit LabelInstruction(std::string name) : name(std::move(name)) {}
+};
+
+// --- NEW: FP compare instruction (ucomisd) ---
+// We use a CmpSDInstruction which instructs emitter to do an unordered compare of two doubles (ucomisd)
+struct CmpSDInstruction : public Instruction {
+    std::unique_ptr<Operand> lhs;
+    std::unique_ptr<Operand> rhs;
+    CmpSDInstruction(std::unique_ptr<Operand> lhs, std::unique_ptr<Operand> rhs)
+        : lhs(std::move(lhs)), rhs(std::move(rhs)) {}
 };
 
 // --- Containers ---

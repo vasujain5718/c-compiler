@@ -13,6 +13,8 @@ enum class TokenType {
     TOKEN_KEYWORD_RETURN,
     TOKEN_KEYWORD_IF,
     TOKEN_KEYWORD_ELSE,
+    TOKEN_KEYWORD_FLOAT,
+    TOKEN_KEYWORD_DOUBLE,
 
     // Punctuation
     TOKEN_QUESTION,
@@ -20,7 +22,8 @@ enum class TokenType {
 
     // Identifiers and Constants
     TOKEN_IDENTIFIER,
-    TOKEN_CONSTANT,
+    TOKEN_CONSTANT,        // integer constant
+    TOKEN_CONSTANT_FLOAT,  // floating-point constant
 
     // Punctuation
     TOKEN_OPEN_PAREN,
@@ -65,7 +68,6 @@ enum class TokenType {
     TOKEN_ILLEGAL
 };
 
-
 struct Token {
     TokenType type;
     std::string value;
@@ -95,3 +97,4 @@ private:
 const char* token_type_to_string(TokenType type);
 
 #endif
+
