@@ -1,3 +1,5 @@
+// tacky_generator.cpp (updated with array support)
+
 #include "tacky_generator.h"
 #include <stdexcept>
 #include <string>
@@ -15,9 +17,13 @@ using std::vector;
 
 // File-local map used during a single generate() run to look up variable types
 // keyed by the unique variable name (DeclarationAST::VarName after semantic pass).
-static std::unordered_map<std::string, tacky::TypeKind> g_var_types;
-
-
+// Now stores more info for arrays.
+struct VarInfo {
+    tacky::TypeKind type;
+    bool is_array;
+    int array_size;
+};
+static std::unordered_map<std::string, VarInfo> g_var_types;
 
 // Helper: convert decl type string to tacky::TypeKind
 // Helper: convert SimpleType (from AST) to tacky::TypeKind
@@ -32,7 +38,6 @@ static tacky::TypeKind type_from_simpletype(SimpleType t)
     }
 }
 
-
 // Helper: collect declarations (recursive) to populate g_var_types
 static void collect_var_types_from_block(const std::vector<std::unique_ptr<BlockItemAST>> &items)
 {
@@ -41,7 +46,11 @@ static void collect_var_types_from_block(const std::vector<std::unique_ptr<Block
         if (auto *decl = dynamic_cast<const DeclarationAST *>(item.get()))
         {
             // DeclarationAST::VarName was rewritten by semantic pass to the unique name.
-            g_var_types[decl->VarName] = type_from_simpletype(decl->DeclType);
+            VarInfo vi;
+            vi.type = type_from_simpletype(decl->DeclType);
+            vi.is_array = (decl->ArraySize > 0);
+            vi.array_size = decl->ArraySize;
+            g_var_types[decl->VarName] = vi;
             continue;
         }
         if (auto *stmt = dynamic_cast<const StatementAST *>(item.get()))
@@ -60,7 +69,11 @@ static void collect_var_types_from_block(const std::vector<std::unique_ptr<Block
                     {
                         if (dinit->InitDecl)
                         {
-                            g_var_types[dinit->InitDecl->VarName] = type_from_simpletype(dinit->InitDecl->DeclType);
+                            VarInfo vi;
+                            vi.type = type_from_simpletype(dinit->InitDecl->DeclType);
+                            vi.is_array = (dinit->InitDecl->ArraySize > 0);
+                            vi.array_size = dinit->InitDecl->ArraySize;
+                            g_var_types[dinit->InitDecl->VarName] = vi;
                         }
                     }
                 }
@@ -71,8 +84,7 @@ static void collect_var_types_from_block(const std::vector<std::unique_ptr<Block
                 }
                 else
                 {
-                    // body can be any statement type - if it's a compound, we already handled; otherwise,
-                    // it may contain nested compounds; we conservatively do nothing here (top-level scan will find nested blocks).
+                    // body can be any statement type - top-level scan will find nested blocks.
                 }
             }
             else if (auto *dw = dynamic_cast<const DoWhileStatementAST *>(stmt))
@@ -113,6 +125,7 @@ static tacky::TypeKind promote_arith_kind(tacky::TypeKind a, tacky::TypeKind b)
         return tacky::TypeKind::Double; // promote float -> double for arithmetic
     return tacky::TypeKind::Int;
 }
+
 // put this near top of the file (file-local helper)
 static tacky::TypeKind infer_kind_from_expr(const ExprAST* e) {
     if (!e) return tacky::TypeKind::Int;
@@ -124,7 +137,19 @@ static tacky::TypeKind infer_kind_from_expr(const ExprAST* e) {
     }
     if (auto ve = dynamic_cast<const VarExprAST*>(e)) {
         auto it = g_var_types.find(ve->Name);
-        if (it != g_var_types.end()) return it->second;
+        if (it != g_var_types.end()) return it->second.type;
+        return tacky::TypeKind::Int;
+    }
+    if (auto ie = dynamic_cast<const IndexExprAST*>(e)) {
+        // element kind of array
+        // base should be VarExprAST after semantic rewrite
+        auto *base_var = dynamic_cast<const VarExprAST*>(ie->Base.get());
+        if (base_var) {
+            auto it = g_var_types.find(base_var->Name);
+            if (it != g_var_types.end()) {
+                return it->second.type;
+            }
+        }
         return tacky::TypeKind::Int;
     }
     if (auto ue = dynamic_cast<const UnaryExprAST*>(e)) {
@@ -202,8 +227,28 @@ void TackyGenerator::generate_declaration(
     const DeclarationAST *decl,
     vector<unique_ptr<tacky::Instruction>> &instructions)
 {
+    // --- NEW: Handle array declarations ---
+    if (decl->ArraySize > 0)
+    {
+        // This is an array declaration (e.g., int arr[5];)
+        // We must emit an ArrayDeclInstruction to reserve its space.
+        
+        tacky::TypeKind elem_kind = type_from_simpletype(decl->DeclType);
+        instructions.push_back(make_unique<tacky::ArrayDeclInstruction>(
+            decl->VarName,
+            elem_kind,
+            decl->ArraySize
+        ));
+        
+        // Array declarations like `int arr[5];` don't have an InitExpr.
+        // We are done with this declaration.
+        return;
+    }
+
+    // --- Original code (unchanged) for non-array (scalar) variables ---
     if (decl->InitExpr)
     {
+        // This is a scalar with an initializer (e.g., int a = 10;)
         auto init_val = generate_expression(decl->InitExpr.get(), instructions);
         // destination var should carry the declared type
         tacky::TypeKind dst_kind = type_from_simpletype(decl->DeclType);
@@ -212,7 +257,8 @@ void TackyGenerator::generate_declaration(
     }
     else
     {
-        // no init -> nothing to emit (storage assumed)
+        // This is a scalar without an initializer (e.g., int x;)
+        // No TACKY instructions are needed, space is assumed.
     }
 }
 
@@ -398,43 +444,64 @@ unique_ptr<tacky::Value> TackyGenerator::generate_expression(
         }
     }
     else if (auto* cexpr = dynamic_cast<const ConditionalExprAST*>(expr)) {
-    // Evaluate condition first (must not evaluate branches unless needed)
-    auto c = generate_expression(cexpr->Condition.get(), instructions);
+        // Evaluate condition first (must not evaluate branches unless needed)
+        auto c = generate_expression(cexpr->Condition.get(), instructions);
 
-    string else_label = make_label();
-    string end_label = make_label();
+        string else_label = make_label();
+        string end_label = make_label();
 
-    // infer kinds without evaluating branches (no side-effects)
-    tacky::TypeKind then_kind = infer_kind_from_expr(cexpr->ThenExpr.get());
-    tacky::TypeKind else_kind = infer_kind_from_expr(cexpr->ElseExpr.get());
-    tacky::TypeKind result_kind = promote_arith_kind(then_kind, else_kind);
+        // infer kinds without evaluating branches (no side-effects)
+        tacky::TypeKind then_kind = infer_kind_from_expr(cexpr->ThenExpr.get());
+        tacky::TypeKind else_kind = infer_kind_from_expr(cexpr->ElseExpr.get());
+        tacky::TypeKind result_kind = promote_arith_kind(then_kind, else_kind);
 
-    auto result = make_temporary(result_kind);
+        auto result = make_temporary(result_kind);
 
-    // Jump to else if condition is zero
-    instructions.push_back(make_unique<tacky::JumpIfZeroInstruction>(move(c), else_label));
+        // Jump to else if condition is zero
+        instructions.push_back(make_unique<tacky::JumpIfZeroInstruction>(move(c), else_label));
 
-    // Then branch: generate and copy into result
-    auto v_then = generate_expression(cexpr->ThenExpr.get(), instructions);
-    instructions.push_back(make_unique<tacky::CopyInstruction>(move(v_then), make_unique<tacky::Var>(result->type, result->name)));
-    instructions.push_back(make_unique<tacky::JumpInstruction>(end_label));
+        // Then branch: generate and copy into result
+        auto v_then = generate_expression(cexpr->ThenExpr.get(), instructions);
+        instructions.push_back(make_unique<tacky::CopyInstruction>(move(v_then), make_unique<tacky::Var>(result->type, result->name)));
+        instructions.push_back(make_unique<tacky::JumpInstruction>(end_label));
 
-    // Else branch
-    instructions.push_back(make_unique<tacky::LabelInstruction>(else_label));
-    auto v_else = generate_expression(cexpr->ElseExpr.get(), instructions);
-    instructions.push_back(make_unique<tacky::CopyInstruction>(move(v_else), make_unique<tacky::Var>(result->type, result->name)));
+        // Else branch
+        instructions.push_back(make_unique<tacky::LabelInstruction>(else_label));
+        auto v_else = generate_expression(cexpr->ElseExpr.get(), instructions);
+        instructions.push_back(make_unique<tacky::CopyInstruction>(move(v_else), make_unique<tacky::Var>(result->type, result->name)));
 
-    // End
-    instructions.push_back(make_unique<tacky::LabelInstruction>(end_label));
-    return result;
-}
-
+        // End
+        instructions.push_back(make_unique<tacky::LabelInstruction>(end_label));
+        return result;
+    }
     else if (auto *var_expr = dynamic_cast<const VarExprAST *>(expr))
     {
         // Look up variable type (unique name) from g_var_types
         auto it = g_var_types.find(var_expr->Name);
-        tacky::TypeKind kind = (it != g_var_types.end()) ? it->second : tacky::TypeKind::Int;
+        tacky::TypeKind kind = (it != g_var_types.end()) ? it->second.type : tacky::TypeKind::Int;
         return make_unique<tacky::Var>(kind, var_expr->Name);
+    }
+    else if (auto *index_expr = dynamic_cast<const IndexExprAST *>(expr))
+    {
+        // base should be a variable name (semantic pass rewrote names)
+        auto *base_var = dynamic_cast<const VarExprAST *>(index_expr->Base.get());
+        if (!base_var)
+            throw runtime_error("Internal Error: Unsupported base for indexing in TACKY gen.");
+
+        auto it = g_var_types.find(base_var->Name);
+        if (it == g_var_types.end() || !it->second.is_array)
+            throw runtime_error("Internal Error: Indexing unknown or non-array variable '" + base_var->Name + "' in TACKY gen.");
+
+        // generate index value (must be int)
+        auto idx_val = generate_expression(index_expr->Index.get(), instructions);
+
+        // create temporary for the loaded element
+        tacky::TypeKind elem_kind = it->second.type;
+        auto dst = make_temporary(elem_kind);
+
+        // emit an ArrayLoadInstruction (base_name, index_value, dst)
+        instructions.push_back(make_unique<tacky::ArrayLoadInstruction>(base_var->Name, move(idx_val), make_unique<tacky::Var>(dst->type, dst->name)));
+        return dst;
     }
     else if (auto *assign_expr = dynamic_cast<const AssignmentExprAST *>(expr))
     {
@@ -608,18 +675,41 @@ unique_ptr<tacky::Value> TackyGenerator::generate_assignment(
     vector<unique_ptr<tacky::Instruction>> &instructions)
 {
     auto rhs_result = generate_expression(assign_expr->RHS.get(), instructions);
-    auto *lhs_var = dynamic_cast<const VarExprAST *>(assign_expr->LHS.get());
-    if (!lhs_var)
-        throw runtime_error("Internal Error: LHS of assignment is not a variable.");
 
-    // Look up declared type for LHS
-    tacky::TypeKind lhs_kind = tacky::TypeKind::Int;
-    auto it = g_var_types.find(lhs_var->Name);
-    if (it != g_var_types.end())
-        lhs_kind = it->second;
+    // LHS can be var or index
+    if (auto *lhs_var = dynamic_cast<const VarExprAST *>(assign_expr->LHS.get()))
+    {
+        // Look up declared type for LHS
+        tacky::TypeKind lhs_kind = tacky::TypeKind::Int;
+        auto it = g_var_types.find(lhs_var->Name);
+        if (it != g_var_types.end())
+            lhs_kind = it->second.type;
 
-    instructions.push_back(make_unique<tacky::CopyInstruction>(move(rhs_result), make_unique<tacky::Var>(lhs_kind, lhs_var->Name)));
-    return make_unique<tacky::Var>(lhs_kind, lhs_var->Name);
+        instructions.push_back(make_unique<tacky::CopyInstruction>(move(rhs_result), make_unique<tacky::Var>(lhs_kind, lhs_var->Name)));
+        return make_unique<tacky::Var>(lhs_kind, lhs_var->Name);
+    }
+    else if (auto *lhs_index = dynamic_cast<const IndexExprAST *>(assign_expr->LHS.get()))
+    {
+        // base must be a var
+        auto *base_var = dynamic_cast<const VarExprAST *>(lhs_index->Base.get());
+        if (!base_var)
+            throw runtime_error("Internal Error: Unsupported LHS indexing in assignment in TACKY gen.");
+
+        auto it = g_var_types.find(base_var->Name);
+        if (it == g_var_types.end() || !it->second.is_array)
+            throw runtime_error("Internal Error: Assignment to unknown or non-array '" + base_var->Name + "' in TACKY gen.");
+
+        // generate index
+        auto idx_val = generate_expression(lhs_index->Index.get(), instructions);
+
+        // emit ArrayStoreInstruction(base_name, index_value, src_value)
+        instructions.push_back(make_unique<tacky::ArrayStoreInstruction>(base_var->Name, move(idx_val), move(rhs_result)));
+
+        // return a Var representing the element location (we return a temporary Var with element kind)
+        return make_unique<tacky::Var>(it->second.type, base_var->Name); // note: name is base name - consumer should know it's an element store
+    }
+
+    throw runtime_error("Internal Error: LHS of assignment is neither Var nor Index in TACKY gen.");
 }
 
 void TackyGenerator::gen_for_init(const ForInitAST *init,

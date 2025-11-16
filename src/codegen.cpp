@@ -36,7 +36,7 @@ static int size_of_tacky_kind(tacky::TypeKind kind)
         return 4;
     }
 }
-
+static std::unordered_map<std::string, int> array_allocation_map;
 unique_ptr<ir::Program> CodeGenerator::generate(const tacky::Program *tacky_prog)
 {
     auto ir_prog = make_unique<ir::Program>();
@@ -44,6 +44,9 @@ unique_ptr<ir::Program> CodeGenerator::generate(const tacky::Program *tacky_prog
 
     stack_map.clear();
     next_stack_offset = 0;
+
+    // clear array allocation tracking for this run
+    array_allocation_map.clear();
 
     generate_function(tacky_prog->function.get(), ir_prog->function.get());
 
@@ -65,8 +68,260 @@ void CodeGenerator::generate_function(const tacky::Function *tacky_func, ir::Fun
     alloc_inst->n = -next_stack_offset;
 }
 
+// File-local helper map to track array allocation bytes we've reserved per base name
+// key: base variable name, value: bytes reserved (positive)
+
+
+// Ensure that base_name has at least 'needed_bytes' reserved starting at its stack_map entry.
+// If base_name isn't yet allocated we allocate needed_bytes (aligned for doubles).
+// If base_name is allocated with fewer bytes, we *do not* try to change existing layout
+// because that would require shifting all previously allocated slots. Instead, we throw.
+// Ensure that base_name has at least 'needed_bytes' reserved starting at its stack_map entry.
+// If base_name isn't yet allocated we allocate needed_bytes (aligned for doubles).
+// If base_name is allocated with fewer bytes, we allow expansion ONLY if the base was the last
+// allocation (i.e., its offset equals the current next_stack_offset_local), otherwise throw.
+static void ensure_array_allocation(std::map<std::string, int> &stack_map_local,
+                                    int &next_stack_offset_local,
+                                    std::unordered_map<std::string, int> &array_alloc_map,
+                                    const std::string &base_name,
+                                    int needed_bytes)
+{
+    // If already reserved, ensure it's at least needed_bytes
+    auto it_alloc = array_alloc_map.find(base_name);
+    if (it_alloc != array_alloc_map.end())
+    {
+        if (it_alloc->second >= needed_bytes)
+            return; // already large enough
+        // previously allocated smaller region -> try expansion below
+    }
+
+    // If stack_map already has an entry for base_name, attempt to expand if possible.
+    auto it = stack_map_local.find(base_name);
+    if (it != stack_map_local.end())
+    {
+        // existing base offset in stack_map
+        int existing_base_off = it->second;
+
+        // If we have an existing reservation entry, use that size; otherwise assume single-slot
+        int existing_alloc = 0;
+        auto it_res = array_alloc_map.find(base_name);
+        if (it_res != array_alloc_map.end())
+        {
+            existing_alloc = it_res->second;
+        }
+        else
+        {
+            // We don't know full reserved size; assume a single-element slot of 4 or 8 depending on alignment.
+            // For safety, compute distance between existing_base_off and current next_stack_offset_local.
+            existing_alloc = (-next_stack_offset_local) - (-existing_base_off);
+            if (existing_alloc < 0) existing_alloc = 0;
+            // If this calculation fails (unexpected), fall back to 0 and require strict allocation.
+        }
+
+        if (existing_alloc >= needed_bytes)
+        {
+            // Already big enough (should have been caught earlier), return.
+            array_alloc_map[base_name] = existing_alloc; // ensure entry exists
+            return;
+        }
+
+        // Can we expand in-place? Only if nothing was allocated after this base,
+        // meaning the base offset should equal current next_stack_offset_local.
+        if (existing_base_off == next_stack_offset_local)
+        {
+            // expand by allocating the additional bytes we need (plus alignment)
+            int extra_needed = needed_bytes - existing_alloc;
+            int pad = 0;
+            if (extra_needed % 8 != 0)
+                pad = (8 - (extra_needed % 8));
+            int alloc_more = extra_needed + pad;
+
+            next_stack_offset_local -= alloc_more;
+            // new base offset is the new next_stack_offset_local
+            stack_map_local[base_name] = next_stack_offset_local;
+            array_alloc_map[base_name] = existing_alloc + alloc_more;
+            return;
+        }
+
+        // Otherwise, doing in-place expansion is unsafe; error out.
+        throw runtime_error("Internal Error: previously allocated array region for '" + base_name +
+                            "' is smaller than required index access and cannot be expanded safely.");
+    }
+
+    // Otherwise allocate needed_bytes now by decrementing next_stack_offset_local.
+    // Align to 8 if needed
+    int pad = 0;
+    if (needed_bytes % 8 != 0)
+    {
+        pad = (8 - (needed_bytes % 8));
+    }
+    int alloc_bytes = needed_bytes + pad;
+
+    next_stack_offset_local -= alloc_bytes;
+    // store base offset
+    stack_map_local[base_name] = next_stack_offset_local;
+    array_alloc_map[base_name] = alloc_bytes;
+}
+
+
 void CodeGenerator::generate_instruction(const tacky::Instruction *tacky_inst, ir::Function *ir_func)
 {
+    if (auto *adecl = dynamic_cast<const tacky::ArrayDeclInstruction *>(tacky_inst))
+
+    {
+
+        // This is the array declaration. We must pre-allocate the
+
+        // entire array's memory block *now*.
+
+
+
+        // 1. Calculate element size
+
+        int elem_size = size_of_tacky_kind(adecl->element_type);
+
+
+
+        // 2. Calculate total bytes needed for all elements
+
+        int total_bytes = adecl->num_elements * elem_size;
+
+
+
+        // 3. Call ensure_array_allocation with the *total size*.
+
+        // This will reserve the full block and set the base address
+
+        // in stack_map correctly, once and for all.
+
+        ensure_array_allocation(stack_map, 
+
+                                next_stack_offset, 
+
+                                array_allocation_map, 
+
+                                adecl->base_name, 
+
+                                total_bytes);
+
+        
+
+        // This instruction's job is done; it emits no assembly itself.
+
+        return;
+
+    }
+    // --- NEW: handle array load/store instructions first (best-effort) ---
+    if (auto *aload = dynamic_cast<const tacky::ArrayLoadInstruction *>(tacky_inst))
+    {
+        // We support immediate (constant) index only in this implementation.
+        // Translate the index value; it must be an immediate for us to compute a stack offset now.
+        auto idx_op = translate_val(aload->index_value.get());
+
+        auto *imm_idx = dynamic_cast<ir::Immediate *>(idx_op.get());
+        if (!imm_idx)
+        {
+            throw runtime_error("Array load with dynamic index not supported by this CodeGenerator. Add IR addressing modes or update emitter.");
+        }
+
+        // parse index integer (simple stoi; user must ensure it is integer constant)
+        int idx = 0;
+        try
+        {
+            idx = std::stoi(imm_idx->value);
+        }
+        catch (...)
+        {
+            throw runtime_error("Array load: non-integer index immediate.");
+        }
+
+        // element size from dst var type
+        int elem_size = size_of_tacky_kind(aload->dst->type);
+
+        // ensure we have reserved enough bytes for base_name up to this index (naive)
+        // Note: we use file-local array_allocation_map to track reservations; translate_val uses member stack_map.
+        ensure_array_allocation(stack_map, next_stack_offset, array_allocation_map, aload->base_name, (idx + 1) * elem_size);
+
+        // compute element offset and create an ir::Stack operand for that element
+        int base_off = stack_map[aload->base_name];
+        int elem_off = base_off + idx * elem_size;
+        auto element_stack = make_unique<ir::Stack>(elem_off, elem_size);
+
+        // allocate destination (temp) on stack via translate_val of the dst Var (this will allocate a temp slot)
+        auto dst_val = translate_val(aload->dst.get()); // will be a Stack temporary
+        // Now emit mov from element_stack -> dst_val
+        // For float/double use movsd, else movl
+        if (elem_size == 8)
+        {
+            ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(move(element_stack), move(dst_val)));
+        }
+        else
+        {
+            ir_func->instructions.push_back(make_unique<ir::MovInstruction>(move(element_stack), move(dst_val)));
+        }
+        return;
+    }
+
+    if (auto *astore = dynamic_cast<const tacky::ArrayStoreInstruction *>(tacky_inst))
+    {
+        // Similar constraints as above: only immediate index handled.
+        auto idx_op = translate_val(astore->index_value.get());
+        auto *imm_idx = dynamic_cast<ir::Immediate *>(idx_op.get());
+        if (!imm_idx)
+        {
+            throw runtime_error("Array store with dynamic index not supported by this CodeGenerator. Add IR addressing modes or update emitter.");
+        }
+
+        int idx = 0;
+        try
+        {
+            idx = std::stoi(imm_idx->value);
+        }
+        catch (...)
+        {
+            throw runtime_error("Array store: non-integer index immediate.");
+        }
+
+        // element size: we don't have direct element-type in ArrayStoreInstruction here, so attempt to deduce from src
+        int elem_size = 4;
+        if (auto *c = dynamic_cast<const tacky::Constant *>(astore->src.get()))
+        {
+            // infer using constant text: '.' or 'e' -> double
+            if (c->value.find('.') != string::npos || c->value.find('e') != string::npos || c->value.find('E') != string::npos)
+                elem_size = 8;
+            else
+                elem_size = 4;
+        }
+        else if (auto *v = dynamic_cast<const tacky::Var *>(astore->src.get()))
+        {
+            // translate_val would allocate stack; but here simply infer size by v->type if this is a Var produced earlier
+            elem_size = size_of_tacky_kind(v->type);
+        }
+        else
+        {
+            // fallback to 4
+            elem_size = 4;
+        }
+
+        ensure_array_allocation(stack_map, next_stack_offset, array_allocation_map, astore->base_name, (idx + 1) * elem_size);
+        int base_off = stack_map[astore->base_name];
+        int elem_off = base_off + idx * elem_size;
+        auto element_stack = make_unique<ir::Stack>(elem_off, elem_size);
+
+        // generate rhs value
+        auto src_val = translate_val(astore->src.get());
+
+        // emit store: mem(elem_off) = src_val
+        if (elem_size == 8)
+        {
+            ir_func->instructions.push_back(make_unique<ir::MovSDInstruction>(move(src_val), move(element_stack)));
+        }
+        else
+        {
+            ir_func->instructions.push_back(make_unique<ir::MovInstruction>(move(src_val), move(element_stack)));
+        }
+        return;
+    }
 
     // --- Return ---
     if (auto *ret_inst = dynamic_cast<const tacky::ReturnInstruction *>(tacky_inst))
@@ -148,7 +403,6 @@ void CodeGenerator::generate_instruction(const tacky::Instruction *tacky_inst, i
         }
 
         if (unary_inst->op == tacky::UnaryOperatorType::Negate)
-
         {
 
             // Check if this is a floating-point operation
@@ -361,10 +615,6 @@ void CodeGenerator::generate_instruction(const tacky::Instruction *tacky_inst, i
             };
 
             // --- END HELPER ---
-
-
-
-
 
             // Arithmetic: promote and do FP binary (use ADDSD/SUBSD/MULSD/DIVSD)
 

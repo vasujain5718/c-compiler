@@ -26,6 +26,8 @@ private:
         std::string unique_name;
         bool from_current_block;
         SimpleType decl_type; // e.g., "int", "float", "double"
+        bool is_array;        // true if this declaration is an array
+        int array_size;       // positive if is_array==true, otherwise 0
     };
     using VarMap = std::map<std::string, MapEntry>;
 

@@ -96,7 +96,30 @@ struct JumpIfZeroInstruction : public Instruction {
     JumpIfZeroInstruction(std::unique_ptr<Value> condition, std::string target)
         : condition(std::move(condition)), target(std::move(target)) {}
 };
+// additions into tacky.h (append near other Instruction subclasses)
 
+struct ArrayLoadInstruction : public Instruction {
+    std::string base_name;                // variable name storing array
+    std::unique_ptr<Value> index_value;   // index expression (produced value)
+    std::unique_ptr<Var> dst;             // destination var to hold loaded element
+    ArrayLoadInstruction(std::string base, std::unique_ptr<Value> idx, std::unique_ptr<Var> dst)
+        : base_name(std::move(base)), index_value(std::move(idx)), dst(std::move(dst)) {}
+};
+
+struct ArrayStoreInstruction : public Instruction {
+    std::string base_name;
+    std::unique_ptr<Value> index_value;
+    std::unique_ptr<Value> src; // value to store
+    ArrayStoreInstruction(std::string base, std::unique_ptr<Value> idx, std::unique_ptr<Value> src)
+        : base_name(std::move(base)), index_value(std::move(idx)), src(std::move(src)) {}
+};
+struct ArrayDeclInstruction : public Instruction {
+    std::string base_name;
+    tacky::TypeKind element_type;
+    int num_elements;
+    ArrayDeclInstruction(std::string base, tacky::TypeKind type, int count)
+        : base_name(std::move(base)), element_type(type), num_elements(count) {}
+};
 struct JumpIfNotZeroInstruction : public Instruction {
     std::unique_ptr<Value> condition;
     std::string target;

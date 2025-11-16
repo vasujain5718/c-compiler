@@ -44,13 +44,19 @@ struct ConstantExprAST : ExprAST {
         : Val(std::move(val)), literal_type(t) {}
 };
 
-
 struct VarExprAST : ExprAST {
     std::string Name;
     SimpleType literal_type;
     explicit VarExprAST(std::string name, SimpleType t = SimpleType::UNKNOWN)
-    : Name(std::move(name)), literal_type(std::move(t)) {}
+        : Name(std::move(name)), literal_type(std::move(t)) {}
+};
 
+// New: Indexing expression for array access (base[index])
+struct IndexExprAST : ExprAST {
+    std::unique_ptr<ExprAST> Base; // can be VarExprAST or another IndexExprAST (for multidim)
+    std::unique_ptr<ExprAST> Index;
+    IndexExprAST(std::unique_ptr<ExprAST> base, std::unique_ptr<ExprAST> index)
+        : Base(std::move(base)), Index(std::move(index)) {}
 };
 
 struct UnaryExprAST : ExprAST {
@@ -178,12 +184,14 @@ struct CompoundStatementAST : StatementAST {
 };
 
 // ---------- Declaration Node (also inherits from BlockItemAST) ----------
+// Now supports optional array size (array_size == 0 => not an array)
 struct DeclarationAST : BlockItemAST {
     SimpleType DeclType; // e.g., "int", "float", "double"
     std::string VarName;
     std::unique_ptr<ExprAST> InitExpr; // Can be nullptr
-    DeclarationAST(SimpleType decl_type, std::string var_name, std::unique_ptr<ExprAST> init_expr = nullptr)
-        : DeclType(std::move(decl_type)), VarName(std::move(var_name)), InitExpr(std::move(init_expr)) {}
+    int ArraySize; // 0 if not an array, positive for fixed-size arrays
+    DeclarationAST(SimpleType decl_type, std::string var_name, std::unique_ptr<ExprAST> init_expr = nullptr, int array_size = 0)
+        : DeclType(std::move(decl_type)), VarName(std::move(var_name)), InitExpr(std::move(init_expr)), ArraySize(array_size) {}
 };
 
 // ---------- Top Level ----------
