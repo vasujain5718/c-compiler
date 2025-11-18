@@ -1,4 +1,4 @@
-// tacky_generator.cpp (updated with array support)
+
 
 #include "tacky_generator.h"
 #include <stdexcept>
@@ -15,9 +15,9 @@ using std::to_string;
 using std::unique_ptr;
 using std::vector;
 
-// File-local map used during a single generate() run to look up variable types
-// keyed by the unique variable name (DeclarationAST::VarName after semantic pass).
-// Now stores more info for arrays.
+
+
+
 struct VarInfo {
     tacky::TypeKind type;
     bool is_array;
@@ -25,27 +25,27 @@ struct VarInfo {
 };
 static std::unordered_map<std::string, VarInfo> g_var_types;
 
-// Helper: convert decl type string to tacky::TypeKind
-// Helper: convert SimpleType (from AST) to tacky::TypeKind
+
+
 static tacky::TypeKind type_from_simpletype(SimpleType t)
 {
     switch (t) {
         case SimpleType::DOUBLE: return tacky::TypeKind::Double;
         case SimpleType::FLOAT:  return tacky::TypeKind::Float;
         case SimpleType::INT:    return tacky::TypeKind::Int;
-        case SimpleType::CHAR:   return tacky::TypeKind::Int; // char treated as int
+        case SimpleType::CHAR:   return tacky::TypeKind::Int; 
         default:                 return tacky::TypeKind::Int;
     }
 }
 
-// Helper: collect declarations (recursive) to populate g_var_types
+
 static void collect_var_types_from_block(const std::vector<std::unique_ptr<BlockItemAST>> &items)
 {
     for (const auto &item : items)
     {
         if (auto *decl = dynamic_cast<const DeclarationAST *>(item.get()))
         {
-            // DeclarationAST::VarName was rewritten by semantic pass to the unique name.
+            
             VarInfo vi;
             vi.type = type_from_simpletype(decl->DeclType);
             vi.is_array = (decl->ArraySize > 0);
@@ -55,14 +55,14 @@ static void collect_var_types_from_block(const std::vector<std::unique_ptr<Block
         }
         if (auto *stmt = dynamic_cast<const StatementAST *>(item.get()))
         {
-            // Recurse into compound statements and for-inits which may contain decls
+            
             if (auto *comp = dynamic_cast<const CompoundStatementAST *>(stmt))
             {
                 collect_var_types_from_block(comp->body_->Items);
             }
             else if (auto *f = dynamic_cast<const ForStatementAST *>(stmt))
             {
-                // for-init might be a declaration
+                
                 if (f->Init)
                 {
                     if (auto *dinit = dynamic_cast<const ForInitDeclAST *>(f->Init.get()))
@@ -77,14 +77,14 @@ static void collect_var_types_from_block(const std::vector<std::unique_ptr<Block
                         }
                     }
                 }
-                // Recurse into body as well
+                
                 if (auto *compbody = dynamic_cast<const CompoundStatementAST *>(f->Body.get()))
                 {
                     collect_var_types_from_block(compbody->body_->Items);
                 }
                 else
                 {
-                    // body can be any statement type - top-level scan will find nested blocks.
+                    
                 }
             }
             else if (auto *dw = dynamic_cast<const DoWhileStatementAST *>(stmt))
@@ -115,18 +115,18 @@ static void collect_var_types_from_block(const std::vector<std::unique_ptr<Block
     }
 }
 
-// Helper: decide promoted kind for arithmetic given two operands.
-// Simple rule: if either is Double or Float -> Double, else Int.
+
+
 static tacky::TypeKind promote_arith_kind(tacky::TypeKind a, tacky::TypeKind b)
 {
     if (a == tacky::TypeKind::Double || b == tacky::TypeKind::Double)
         return tacky::TypeKind::Double;
     if (a == tacky::TypeKind::Float || b == tacky::TypeKind::Float)
-        return tacky::TypeKind::Double; // promote float -> double for arithmetic
+        return tacky::TypeKind::Double; 
     return tacky::TypeKind::Int;
 }
 
-// put this near top of the file (file-local helper)
+
 static tacky::TypeKind infer_kind_from_expr(const ExprAST* e) {
     if (!e) return tacky::TypeKind::Int;
     if (auto ce = dynamic_cast<const ConstantExprAST*>(e)) {
@@ -141,8 +141,8 @@ static tacky::TypeKind infer_kind_from_expr(const ExprAST* e) {
         return tacky::TypeKind::Int;
     }
     if (auto ie = dynamic_cast<const IndexExprAST*>(e)) {
-        // element kind of array
-        // base should be VarExprAST after semantic rewrite
+        
+        
         auto *base_var = dynamic_cast<const VarExprAST*>(ie->Base.get());
         if (base_var) {
             auto it = g_var_types.find(base_var->Name);
@@ -165,14 +165,14 @@ static tacky::TypeKind infer_kind_from_expr(const ExprAST* e) {
         auto k2 = infer_kind_from_expr(ce2->ElseExpr.get());
         return promote_arith_kind(k1, k2);
     }
-    // fallback
+    
     return tacky::TypeKind::Int;
 }
 
 
 unique_ptr<tacky::Program> TackyGenerator::generate(const FunctionAST *ast)
 {
-    // Prepare global var type map for this generate run
+    
     g_var_types.clear();
     collect_var_types_from_block(ast->Body);
 
@@ -189,7 +189,7 @@ unique_ptr<tacky::Program> TackyGenerator::generate(const FunctionAST *ast)
         generate_block_item(item.get(), tacky_program->function->body);
     }
 
-    // Implicit "return 0" for main if not already returned
+    
     bool has_returned = false;
     if (!tacky_program->function->body.empty())
     {
@@ -227,11 +227,11 @@ void TackyGenerator::generate_declaration(
     const DeclarationAST *decl,
     vector<unique_ptr<tacky::Instruction>> &instructions)
 {
-    // --- NEW: Handle array declarations ---
+    
     if (decl->ArraySize > 0)
     {
-        // This is an array declaration (e.g., int arr[5];)
-        // We must emit an ArrayDeclInstruction to reserve its space.
+        
+        
         
         tacky::TypeKind elem_kind = type_from_simpletype(decl->DeclType);
         instructions.push_back(make_unique<tacky::ArrayDeclInstruction>(
@@ -240,25 +240,25 @@ void TackyGenerator::generate_declaration(
             decl->ArraySize
         ));
         
-        // Array declarations like `int arr[5];` don't have an InitExpr.
-        // We are done with this declaration.
+        
+        
         return;
     }
 
-    // --- Original code (unchanged) for non-array (scalar) variables ---
+    
     if (decl->InitExpr)
     {
-        // This is a scalar with an initializer (e.g., int a = 10;)
+        
         auto init_val = generate_expression(decl->InitExpr.get(), instructions);
-        // destination var should carry the declared type
+        
         tacky::TypeKind dst_kind = type_from_simpletype(decl->DeclType);
         auto var_dst = make_unique<tacky::Var>(dst_kind, decl->VarName);
         instructions.push_back(make_unique<tacky::CopyInstruction>(move(init_val), move(var_dst)));
     }
     else
     {
-        // This is a scalar without an initializer (e.g., int x;)
-        // No TACKY instructions are needed, space is assumed.
+        
+        
     }
 }
 
@@ -266,7 +266,7 @@ void TackyGenerator::generate_statement(
     const StatementAST *stmt,
     vector<unique_ptr<tacky::Instruction>> &instructions)
 {
-    // return
+    
     if (auto *ret_stmt = dynamic_cast<const ReturnStatementAST *>(stmt))
     {
         auto return_val = generate_expression(ret_stmt->Expression.get(), instructions);
@@ -274,7 +274,7 @@ void TackyGenerator::generate_statement(
         return;
     }
 
-    // if / else
+    
     if (auto *if_stmt = dynamic_cast<const IfStatementAST *>(stmt))
     {
         auto c = generate_expression(if_stmt->Condition.get(), instructions);
@@ -300,7 +300,7 @@ void TackyGenerator::generate_statement(
         return;
     }
 
-    // compound block
+    
     if (auto *comp = dynamic_cast<const CompoundStatementAST *>(stmt))
     {
         for (const auto &it : comp->body_->Items)
@@ -310,7 +310,7 @@ void TackyGenerator::generate_statement(
         return;
     }
 
-    // simple expr / null
+    
     if (auto *expr_stmt = dynamic_cast<const ExpressionStatementAST *>(stmt))
     {
         generate_expression(expr_stmt->Expression.get(), instructions);
@@ -319,13 +319,13 @@ void TackyGenerator::generate_statement(
     if (dynamic_cast<const NullStatementAST *>(stmt))
         return;
 
-    // ---------- Chapter 8: Loops & break/continue ----------
+    
 
-    // while (<cond>) <body>
+    
     if (auto *w = dynamic_cast<const WhileStatementAST *>(stmt))
     {
-        string continue_label = make_label(); // start of loop / also continue target
-        string break_label = make_label();    // end of loop
+        string continue_label = make_label(); 
+        string break_label = make_label();    
 
         loop_label_stack_.emplace_back(continue_label, break_label);
 
@@ -340,12 +340,12 @@ void TackyGenerator::generate_statement(
         return;
     }
 
-    // do <body> while (<cond>);
+    
     if (auto *dw = dynamic_cast<const DoWhileStatementAST *>(stmt))
     {
-        string start_label = make_label();    // start label
-        string continue_label = make_label(); // between body and condition
-        string break_label = make_label();    // end
+        string start_label = make_label();    
+        string continue_label = make_label(); 
+        string break_label = make_label();    
 
         loop_label_stack_.emplace_back(continue_label, break_label);
 
@@ -360,37 +360,37 @@ void TackyGenerator::generate_statement(
         return;
     }
 
-    // for (<init>; <cond>; <post>) <body>
+    
     if (auto *f = dynamic_cast<const ForStatementAST *>(stmt))
     {
         string start_label = make_label();
         string continue_label = make_label();
         string break_label = make_label();
 
-        // init
+        
         gen_for_init(f->Init.get(), instructions);
 
         loop_label_stack_.emplace_back(continue_label, break_label);
 
-        // start / condition
+        
         instructions.push_back(make_unique<tacky::LabelInstruction>(start_label));
         if (f->Condition)
         {
             auto c = generate_expression(f->Condition.get(), instructions);
             instructions.push_back(make_unique<tacky::JumpIfZeroInstruction>(move(c), break_label));
         }
-        // body
+        
         generate_statement(f->Body.get(), instructions);
 
-        // continue: post
+        
         instructions.push_back(make_unique<tacky::LabelInstruction>(continue_label));
         if (f->Increment)
         {
-            // evaluate for side effects; ignore result
+            
             (void)generate_expression(f->Increment.get(), instructions);
         }
 
-        // back to start
+        
         instructions.push_back(make_unique<tacky::JumpInstruction>(start_label));
         instructions.push_back(make_unique<tacky::LabelInstruction>(break_label));
 
@@ -398,7 +398,7 @@ void TackyGenerator::generate_statement(
         return;
     }
 
-    // break / continue
+    
     if (dynamic_cast<const BreakStatementAST *>(stmt))
     {
         if (loop_label_stack_.empty())
@@ -406,7 +406,7 @@ void TackyGenerator::generate_statement(
             throw runtime_error("Internal Error: 'break' not inside a loop when generating TACKY.");
         }
         const auto &top = loop_label_stack_.back();
-        instructions.push_back(make_unique<tacky::JumpInstruction>(top.second)); // break_label
+        instructions.push_back(make_unique<tacky::JumpInstruction>(top.second)); 
         return;
     }
     if (dynamic_cast<const ContinueStatementAST *>(stmt))
@@ -416,11 +416,11 @@ void TackyGenerator::generate_statement(
             throw runtime_error("Internal Error: 'continue' not inside a loop when generating TACKY.");
         }
         const auto &top = loop_label_stack_.back();
-        instructions.push_back(make_unique<tacky::JumpInstruction>(top.first)); // continue_label
+        instructions.push_back(make_unique<tacky::JumpInstruction>(top.first)); 
         return;
     }
 
-    // -------------------------------------------------------
+    
 
     throw runtime_error("Unsupported statement type in TACKY generator");
 }
@@ -431,7 +431,7 @@ unique_ptr<tacky::Value> TackyGenerator::generate_expression(
 {
     if (auto *const_expr = dynamic_cast<const ConstantExprAST *>(expr))
     {
-        // type constants: if contains '.' or 'e'/'E' -> double, else int
+        
         const string &lit = const_expr->Val;
         bool is_float = (lit.find('.') != string::npos) || (lit.find('e') != string::npos) || (lit.find('E') != string::npos);
         if (is_float)
@@ -444,46 +444,46 @@ unique_ptr<tacky::Value> TackyGenerator::generate_expression(
         }
     }
     else if (auto* cexpr = dynamic_cast<const ConditionalExprAST*>(expr)) {
-        // Evaluate condition first (must not evaluate branches unless needed)
+        
         auto c = generate_expression(cexpr->Condition.get(), instructions);
 
         string else_label = make_label();
         string end_label = make_label();
 
-        // infer kinds without evaluating branches (no side-effects)
+        
         tacky::TypeKind then_kind = infer_kind_from_expr(cexpr->ThenExpr.get());
         tacky::TypeKind else_kind = infer_kind_from_expr(cexpr->ElseExpr.get());
         tacky::TypeKind result_kind = promote_arith_kind(then_kind, else_kind);
 
         auto result = make_temporary(result_kind);
 
-        // Jump to else if condition is zero
+        
         instructions.push_back(make_unique<tacky::JumpIfZeroInstruction>(move(c), else_label));
 
-        // Then branch: generate and copy into result
+        
         auto v_then = generate_expression(cexpr->ThenExpr.get(), instructions);
         instructions.push_back(make_unique<tacky::CopyInstruction>(move(v_then), make_unique<tacky::Var>(result->type, result->name)));
         instructions.push_back(make_unique<tacky::JumpInstruction>(end_label));
 
-        // Else branch
+        
         instructions.push_back(make_unique<tacky::LabelInstruction>(else_label));
         auto v_else = generate_expression(cexpr->ElseExpr.get(), instructions);
         instructions.push_back(make_unique<tacky::CopyInstruction>(move(v_else), make_unique<tacky::Var>(result->type, result->name)));
 
-        // End
+        
         instructions.push_back(make_unique<tacky::LabelInstruction>(end_label));
         return result;
     }
     else if (auto *var_expr = dynamic_cast<const VarExprAST *>(expr))
     {
-        // Look up variable type (unique name) from g_var_types
+        
         auto it = g_var_types.find(var_expr->Name);
         tacky::TypeKind kind = (it != g_var_types.end()) ? it->second.type : tacky::TypeKind::Int;
         return make_unique<tacky::Var>(kind, var_expr->Name);
     }
     else if (auto *index_expr = dynamic_cast<const IndexExprAST *>(expr))
     {
-        // base should be a variable name (semantic pass rewrote names)
+        
         auto *base_var = dynamic_cast<const VarExprAST *>(index_expr->Base.get());
         if (!base_var)
             throw runtime_error("Internal Error: Unsupported base for indexing in TACKY gen.");
@@ -492,14 +492,14 @@ unique_ptr<tacky::Value> TackyGenerator::generate_expression(
         if (it == g_var_types.end() || !it->second.is_array)
             throw runtime_error("Internal Error: Indexing unknown or non-array variable '" + base_var->Name + "' in TACKY gen.");
 
-        // generate index value (must be int)
+        
         auto idx_val = generate_expression(index_expr->Index.get(), instructions);
 
-        // create temporary for the loaded element
+        
         tacky::TypeKind elem_kind = it->second.type;
         auto dst = make_temporary(elem_kind);
 
-        // emit an ArrayLoadInstruction (base_name, index_value, dst)
+        
         instructions.push_back(make_unique<tacky::ArrayLoadInstruction>(base_var->Name, move(idx_val), make_unique<tacky::Var>(dst->type, dst->name)));
         return dst;
     }
@@ -510,16 +510,16 @@ unique_ptr<tacky::Value> TackyGenerator::generate_expression(
     else if (auto *unary_expr = dynamic_cast<const UnaryExprAST *>(expr))
     {
         auto src_val = generate_expression(unary_expr->Operand.get(), instructions);
-        // Determine destination kind
+        
         tacky::TypeKind dst_kind = src_val->type;
         if (unary_expr->Op.type == TokenType::TOKEN_OPERATOR_LOGICAL_NEG)
         {
-            // '!' yields int
+            
             dst_kind = tacky::TypeKind::Int;
         }
         else if (unary_expr->Op.type == TokenType::TOKEN_OPERATOR_BITWISE_COMPLEMENT)
         {
-            // '~' requires int operand
+            
             if (src_val->type != tacky::TypeKind::Int)
                 throw runtime_error("Internal Error: bitwise complement operand not integer in TACKY gen");
             dst_kind = tacky::TypeKind::Int;
@@ -549,7 +549,7 @@ unique_ptr<tacky::Value> TackyGenerator::generate_expression(
     }
     else if (auto *binary_expr = dynamic_cast<const BinaryExprAST *>(expr))
     {
-        // short-circuit logical ops
+        
         if (binary_expr->Op.type == TokenType::TOKEN_OPERATOR_LOGICAL_AND)
         {
             string false_label = make_label();
@@ -586,9 +586,9 @@ unique_ptr<tacky::Value> TackyGenerator::generate_expression(
         auto lhs = generate_expression(binary_expr->LHS.get(), instructions);
         auto rhs = generate_expression(binary_expr->RHS.get(), instructions);
 
-        // Determine destination kind
+        
         tacky::TypeKind dst_kind;
-        // For arithmetic ops: promote
+        
         if (binary_expr->Op.type == TokenType::TOKEN_OPERATOR_PLUS ||
             binary_expr->Op.type == TokenType::TOKEN_OPERATOR_MINUS ||
             binary_expr->Op.type == TokenType::TOKEN_OPERATOR_MULTIPLY ||
@@ -598,7 +598,7 @@ unique_ptr<tacky::Value> TackyGenerator::generate_expression(
         }
         else
         {
-            // comparisons, equality, etc. -> produce int
+            
             dst_kind = tacky::TypeKind::Int;
         }
 
@@ -644,7 +644,7 @@ unique_ptr<tacky::Value> TackyGenerator::generate_expression(
             throw runtime_error("Unknown binary operator type in TACKY generator.");
         }
 
-        // Enforce integer-only ops where necessary
+        
         if (binary_expr->Op.type == TokenType::TOKEN_OPERATOR_MODULO)
         {
             if (lhs->type != tacky::TypeKind::Int || rhs->type != tacky::TypeKind::Int)
@@ -662,7 +662,7 @@ unique_ptr<tacky::Value> TackyGenerator::generate_expression(
             throw runtime_error("Internal Error: comparison on non-numeric types in TACKY gen");
         }
 
-        // emit instruction: create a new Var for the dst inside the instruction (keep dst unique to return)
+        
         instructions.push_back(make_unique<tacky::BinaryInstruction>(op, move(lhs), move(rhs), make_unique<tacky::Var>(dst->type, dst->name)));
         return dst;
     }
@@ -676,10 +676,10 @@ unique_ptr<tacky::Value> TackyGenerator::generate_assignment(
 {
     auto rhs_result = generate_expression(assign_expr->RHS.get(), instructions);
 
-    // LHS can be var or index
+    
     if (auto *lhs_var = dynamic_cast<const VarExprAST *>(assign_expr->LHS.get()))
     {
-        // Look up declared type for LHS
+        
         tacky::TypeKind lhs_kind = tacky::TypeKind::Int;
         auto it = g_var_types.find(lhs_var->Name);
         if (it != g_var_types.end())
@@ -690,7 +690,7 @@ unique_ptr<tacky::Value> TackyGenerator::generate_assignment(
     }
     else if (auto *lhs_index = dynamic_cast<const IndexExprAST *>(assign_expr->LHS.get()))
     {
-        // base must be a var
+        
         auto *base_var = dynamic_cast<const VarExprAST *>(lhs_index->Base.get());
         if (!base_var)
             throw runtime_error("Internal Error: Unsupported LHS indexing in assignment in TACKY gen.");
@@ -699,14 +699,14 @@ unique_ptr<tacky::Value> TackyGenerator::generate_assignment(
         if (it == g_var_types.end() || !it->second.is_array)
             throw runtime_error("Internal Error: Assignment to unknown or non-array '" + base_var->Name + "' in TACKY gen.");
 
-        // generate index
+        
         auto idx_val = generate_expression(lhs_index->Index.get(), instructions);
 
-        // emit ArrayStoreInstruction(base_name, index_value, src_value)
+        
         instructions.push_back(make_unique<tacky::ArrayStoreInstruction>(base_var->Name, move(idx_val), move(rhs_result)));
 
-        // return a Var representing the element location (we return a temporary Var with element kind)
-        return make_unique<tacky::Var>(it->second.type, base_var->Name); // note: name is base name - consumer should know it's an element store
+        
+        return make_unique<tacky::Var>(it->second.type, base_var->Name); 
     }
 
     throw runtime_error("Internal Error: LHS of assignment is neither Var nor Index in TACKY gen.");

@@ -11,7 +11,6 @@ using std::ostream;
 using std::runtime_error;
 using std::string;
 
-// Helper to convert CondCode enum to assembly string (e.g., E -> e, NE -> ne)
 string cond_code_to_string(ir::CondCode cond)
 {
     switch (cond)
@@ -44,11 +43,7 @@ string cond_code_to_string(ir::CondCode cond)
 
 AssemblyEmitter::AssemblyEmitter(ostream &out) : out(out) {}
 
-//
-// We'll maintain a small map of floating immediates we encounter to labels.
-// The emitter will add those to the read-only data section at the end.
-//
-static std::map<std::string, std::string> float_constant_pool; // literal -> .LCn
+static std::map<std::string, std::string> float_constant_pool;
 static int float_const_counter = 0;
 
 static std::string intern_float_constant(const std::string &lit)
@@ -63,13 +58,12 @@ static std::string intern_float_constant(const std::string &lit)
 
 void AssemblyEmitter::emit(const ir::Program *program)
 {
-    // Reset constant pool for each program emit
+
     float_constant_pool.clear();
     float_const_counter = 0;
 
     emit_function(program->function.get());
 
-    // Emit constant pool for floating immediates
     if (!float_constant_pool.empty())
     {
         out << "    .section .rodata" << endl;
@@ -77,7 +71,7 @@ void AssemblyEmitter::emit(const ir::Program *program)
         {
             const string &lit = kv.first;
             const string &lbl = kv.second;
-            // emit a double constant; the literal string should be a valid double representation
+
             out << lbl << ":" << endl;
             out << "    .double " << lit << endl;
         }
@@ -112,7 +106,7 @@ void AssemblyEmitter::emit_function(const ir::Function *func)
     {
         emit_instruction(func->instructions[i].get());
     }
-    // SAFETY: ensure epilogue + ret if none emitted earlier
+
     out << "    movq %rbp, %rsp" << std::endl;
     out << "    popq %rbp" << std::endl;
     out << "    ret" << std::endl;
@@ -122,7 +116,7 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
 {
     if (auto *movsd_inst = dynamic_cast<const ir::MovSDInstruction *>(inst))
     {
-        // movsd has several forms: mem->xmm, xmm->mem, xmm->xmm, imm->xmm (via constant pool)
+
         auto *src_imm = dynamic_cast<const ir::Immediate *>(movsd_inst->src.get());
         auto *src_reg = dynamic_cast<const ir::Register *>(movsd_inst->src.get());
         auto *src_stack = dynamic_cast<const ir::Stack *>(movsd_inst->src.get());
@@ -130,45 +124,30 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
         auto *dst_reg = dynamic_cast<const ir::Register *>(movsd_inst->dest.get());
         auto *dst_stack = dynamic_cast<const ir::Stack *>(movsd_inst->dest.get());
 
-        // imm -> xmm or imm -> mem (we will load imm from .rodata into xmm then movsd)
-        // [ADD THIS BLOCK]
-
         if (src_imm)
 
         {
 
             std::string lbl = intern_float_constant(src_imm->value);
 
-
-
             if (dst_reg)
 
             {
 
-                // FIX: Load constant from pool DIRECTLY into the destination register
-
                 out << "    movsd " << lbl << "(%rip), ";
 
-                emit_operand(dst_reg); // Use helper to print %xmm0, %xmm1, etc.
+                emit_operand(dst_reg);
 
                 out << endl;
-
             }
 
             else if (dst_stack)
 
             {
 
-                // This is imm -> mem. We must use a temporary register.
-
-                // We'll use %xmm7 as a dedicated scratch register.
-
-                // Using %xmm1 is dangerous as it clobbers live values.
-
                 out << "    movsd " << lbl << "(%rip), %xmm7" << endl;
 
                 out << "    movsd %xmm7, " << dst_stack->val << "(%rbp)" << endl;
-
             }
 
             else
@@ -176,17 +155,14 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
             {
 
                 throw runtime_error("Emitter Error: movsd immediate destination unsupported.");
-
             }
 
             return;
-
         }
 
-        // xmm -> mem or mem -> xmm or xmm->xmm
         if (src_reg && dst_reg)
         {
-            // xmm -> xmm
+
             auto srcname = [&]()
             {
                 switch (src_reg->name.type)
@@ -311,7 +287,6 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
             return;
         }
 
-        // If both are stacks (mem->mem), do mem->xmm temp then xmm->mem
         if (src_stack && dst_stack)
         {
             out << "    movsd " << src_stack->val << "(%rbp), %xmm7" << endl;
@@ -321,15 +296,10 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
 
         throw runtime_error("Emitter Error: Unsupported movsd operand pattern");
     }
-    // Add this block inside AssemblyEmitter::emit_instruction
 
     else if (auto *cvtsi_inst = dynamic_cast<const ir::CvtSI2SDInstruction *>(inst))
 
     {
-
-        // cvtsi2sd <mem32>, <xmm_reg>
-
-        // cvtsi2sd <reg32>, <xmm_reg>
 
         out << "    cvtsi2sd ";
 
@@ -340,23 +310,13 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
         emit_operand(cvtsi_inst->dest.get());
 
         out << endl;
-
     }
     else if (auto *mov_inst = dynamic_cast<const ir::MovInstruction *>(inst))
     {
-        // --- MOV (integer / 32-bit movl semantics) ---
+
         auto *src_is_stack = dynamic_cast<ir::Stack *>(mov_inst->src.get());
         auto *dst_is_stack = dynamic_cast<ir::Stack *>(mov_inst->dest.get());
 
-        // NOTE:
-        // Historically we refused to emit a 32-bit movl into an 8-byte stack slot
-        // (dst_is_stack && dst_is_stack->size == 8). That caused the runtime error
-        // you saw. It is safe to allow movl into an 8-byte slot (it writes the low
-        // 32 bits and leaves the high 32 bits unchanged); many places in the
-        // pipeline allocate 8-byte aligned slots but store 32-bit ints there.
-        //
-        // So instead of throwing, emit movl normally. Keep the mem->mem fixup
-        // using %r10d as before.
         if (src_is_stack && dst_is_stack)
         {
             out << "    movl ";
@@ -378,7 +338,7 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
 
     else if (dynamic_cast<const ir::RetInstruction *>(inst))
     {
-        // Function Epilogue is handled correctly in emit_function
+
         out << "    movq %rbp, %rsp" << endl;
         out << "    popq %rbp" << endl;
         out << "    ret" << endl;
@@ -392,18 +352,16 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
     }
     else if (dynamic_cast<const ir::AllocateStackInstruction *>(inst))
     {
-        // Do nothing, handled in prologue in emit_function
     }
     else if (auto *bin_inst = dynamic_cast<const ir::BinaryInstruction *>(inst))
     {
-        // handle FP binary types separately
+
         if (bin_inst->op == ir::BinaryType::ADDSD ||
             bin_inst->op == ir::BinaryType::SUBSD ||
             bin_inst->op == ir::BinaryType::MULSD ||
             bin_inst->op == ir::BinaryType::DIVSD)
         {
-            // binary form is <op> xmm_src, xmm_dest (we used register operands)
-            // lhs -> source, rhs -> destination (we followed that convention in codegen)
+
             string op_str;
             if (bin_inst->op == ir::BinaryType::ADDSD)
                 op_str = "addsd";
@@ -415,7 +373,7 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
                 op_str = "divsd";
 
             out << "    " << op_str << " ";
-            // print lhs then rhs
+
             emit_operand(bin_inst->lhs.get());
             out << ", ";
             emit_operand(bin_inst->rhs.get());
@@ -423,7 +381,6 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
             return;
         }
 
-        // integer binary ops
         string op_str;
         switch (bin_inst->op)
         {
@@ -440,7 +397,6 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
             throw runtime_error("Emitter: Unsupported binary op kind");
         }
 
-        // --- FIXUP FOR <op> <mem>, <mem> ---
         auto *lhs_is_stack = dynamic_cast<ir::Stack *>(bin_inst->lhs.get());
         auto *rhs_is_stack = dynamic_cast<ir::Stack *>(bin_inst->rhs.get());
         auto *lhs_is_imm = dynamic_cast<ir::Immediate *>(bin_inst->lhs.get());
@@ -456,7 +412,7 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
         }
         else if (lhs_is_imm && rhs_is_stack && bin_inst->op == ir::BinaryType::MUL)
         {
-            // Fixup for `imull <imm>, <mem>`
+
             out << "    movl ";
             emit_operand(bin_inst->rhs.get());
             out << ", %r11d" << endl;
@@ -478,7 +434,7 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
     }
     else if (auto *idiv_inst = dynamic_cast<const ir::IdivInstruction *>(inst))
     {
-        // --- FIXUP for `idivl <imm>` ---
+
         if (dynamic_cast<ir::Immediate *>(idiv_inst->divisor.get()))
         {
             out << "    movl ";
@@ -504,7 +460,6 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
         auto *lhs_is_imm = dynamic_cast<ir::Immediate *>(cmp_inst->lhs.get());
         auto *rhs_is_imm = dynamic_cast<ir::Immediate *>(cmp_inst->rhs.get());
 
-        // Ensure RHS is not immediate (cmpl SRC, DEST) => DEST cannot be immediate
         if (rhs_is_imm)
         {
             out << "    movl ";
@@ -517,7 +472,6 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
             return;
         }
 
-        // If LHS is mem or imm AND RHS is mem, move LHS to a reg first (mem/mem invalid)
         if ((lhs_is_stack || lhs_is_imm) && rhs_is_stack)
         {
             out << "    movl ";
@@ -530,7 +484,6 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
             return;
         }
 
-        // Otherwise it's already valid (reg or imm vs reg or mem)
         out << "    cmpl ";
         emit_operand(cmp_inst->lhs.get());
         out << ", ";
@@ -540,14 +493,12 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
 
     else if (auto *cmpsd_inst = dynamic_cast<const ir::CmpSDInstruction *>(inst))
     {
-        // ucomisd <lhs>, <rhs>  (lhs and rhs are xmm/reg/mem)
-        // We accept Register or Stack operands. If Stack provided, we generate movsd mem, %xmm1 then ucomisd %xmm1, <rhs>
+
         auto *lhs_stack = dynamic_cast<const ir::Stack *>(cmpsd_inst->lhs.get());
         auto *rhs_stack = dynamic_cast<const ir::Stack *>(cmpsd_inst->rhs.get());
         auto *lhs_reg = dynamic_cast<const ir::Register *>(cmpsd_inst->lhs.get());
         auto *rhs_reg = dynamic_cast<const ir::Register *>(cmpsd_inst->rhs.get());
 
-        // Normalize into xmm registers and then ucomisd
         if (lhs_stack)
         {
             out << "    movsd " << lhs_stack->val << "(%rbp), %xmm1" << endl;
@@ -558,7 +509,7 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
             }
             else if (rhs_reg)
             {
-                // ucomisd xmm1, xmmN? we want ucomisd src, dst => ucomisd <lhs>, <rhs>
+
                 string rname;
                 switch (rhs_reg->name.type)
                 {
@@ -690,7 +641,6 @@ void AssemblyEmitter::emit_instruction(const ir::Instruction *inst)
     {
         out << "    set" << cond_code_to_string(setcc_inst->cond) << " ";
 
-        // Per codegen, we usually pass a Register R10 as dest
         auto *reg = dynamic_cast<ir::Register *>(setcc_inst->dest.get());
         if (reg && reg->name.type == ir::RegType::R10)
         {
@@ -716,15 +666,14 @@ void AssemblyEmitter::emit_operand(const ir::Operand *op)
 {
     if (auto *imm = dynamic_cast<const ir::Immediate *>(op))
     {
-        // If it looks like a floating literal (contains '.' or e/E) we must refer to constant pool.
-        // Use the memory address label (lbl(%rip)) — not an immediate ($lbl) which is invalid.
+
         if (imm->value.find('.') != std::string::npos || imm->value.find('e') != std::string::npos || imm->value.find('E') != std::string::npos)
         {
             std::string lbl = intern_float_constant(imm->value);
-            out << lbl << "(%rip)"; // memory reference to constant pool
+            out << lbl << "(%rip)";
             return;
         }
-        // integer immediate
+
         out << "$" << imm->value;
     }
 

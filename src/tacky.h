@@ -17,7 +17,7 @@ enum class TypeKind {
 enum class UnaryOperatorType {
     Complement,
     Negate,
-    LogicalNot // NEW
+    LogicalNot 
 };
 
 enum class BinaryOperatorType {
@@ -43,7 +43,7 @@ struct Value {
 };
 
 struct Constant : public Value {
-    std::string value; // textual representation
+    std::string value; 
     Constant(TypeKind t, std::string val) : Value(t), value(std::move(val)) {}
 };
 
@@ -57,7 +57,7 @@ struct Instruction {
 };
 
 struct ReturnInstruction : public Instruction {
-    std::unique_ptr<Value> val; // may be nullptr
+    std::unique_ptr<Value> val; 
     explicit ReturnInstruction(std::unique_ptr<Value> val) : val(std::move(val)) {}
 };
 
@@ -96,12 +96,12 @@ struct JumpIfZeroInstruction : public Instruction {
     JumpIfZeroInstruction(std::unique_ptr<Value> condition, std::string target)
         : condition(std::move(condition)), target(std::move(target)) {}
 };
-// additions into tacky.h (append near other Instruction subclasses)
+
 
 struct ArrayLoadInstruction : public Instruction {
-    std::string base_name;                // variable name storing array
-    std::unique_ptr<Value> index_value;   // index expression (produced value)
-    std::unique_ptr<Var> dst;             // destination var to hold loaded element
+    std::string base_name;                
+    std::unique_ptr<Value> index_value;   
+    std::unique_ptr<Var> dst;             
     ArrayLoadInstruction(std::string base, std::unique_ptr<Value> idx, std::unique_ptr<Var> dst)
         : base_name(std::move(base)), index_value(std::move(idx)), dst(std::move(dst)) {}
 };
@@ -109,7 +109,7 @@ struct ArrayLoadInstruction : public Instruction {
 struct ArrayStoreInstruction : public Instruction {
     std::string base_name;
     std::unique_ptr<Value> index_value;
-    std::unique_ptr<Value> src; // value to store
+    std::unique_ptr<Value> src; 
     ArrayStoreInstruction(std::string base, std::unique_ptr<Value> idx, std::unique_ptr<Value> src)
         : base_name(std::move(base)), index_value(std::move(idx)), src(std::move(src)) {}
 };
@@ -141,9 +141,9 @@ struct Program {
     std::unique_ptr<Function> function;
 };
 
-} // namespace tacky
+} 
 
-#endif // TACKY_H
+#endif 
 
 #ifndef TACKY_GENERATOR_H
 #define TACKY_GENERATOR_H
@@ -160,19 +160,19 @@ public:
     std::unique_ptr<tacky::Program> generate(const FunctionAST* ast);
 
 private:
-    // Expr -> Value
+    
     std::unique_ptr<tacky::Value> generate_expression(
         const ExprAST* expr,
         std::vector<std::unique_ptr<tacky::Instruction>>& instructions
     );
 
-    // Block item dispatch
+    
     void generate_block_item(
         const BlockItemAST* item,
         std::vector<std::unique_ptr<tacky::Instruction>>& instructions
     );
 
-    // Statements / Decls
+    
     void generate_statement(
         const StatementAST* stmt,
         std::vector<std::unique_ptr<tacky::Instruction>>& instructions
@@ -183,25 +183,25 @@ private:
         std::vector<std::unique_ptr<tacky::Instruction>>& instructions
     );
 
-    // Assignments
+    
     std::unique_ptr<tacky::Value> generate_assignment(
         const AssignmentExprAST* assign_expr,
         std::vector<std::unique_ptr<tacky::Instruction>>& instructions
     );
 
-    // --- NEW: helpers for loops ---
+    
     void gen_for_init(const ForInitAST* init,
                       std::vector<std::unique_ptr<tacky::Instruction>>& instructions);
 
-    // label management
+    
     std::unique_ptr<tacky::Var> make_temporary(tacky::TypeKind kind);
     std::string make_label();
 
     int next_var_id = 0;
     int next_label_id = 0;
 
-    // Stack of (continue_label, break_label) for innermost loop
+    
     std::vector<std::pair<std::string, std::string>> loop_label_stack_;
 };
 
-#endif // TACKY__H
+#endif 

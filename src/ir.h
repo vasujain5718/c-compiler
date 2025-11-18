@@ -6,10 +6,10 @@
 #include <memory>
 #include <utility>
 
-// We'll use the 'ir' namespace
+
 namespace ir {
 
-// --- Enums ---
+
 
 enum class UnaryType {
     NOT,
@@ -20,25 +20,25 @@ enum class BinaryType {
     ADD,
     SUB,
     MUL,
-    // integer-only or generic integer ops above; floating variants below:
+    
     ADDSD,
     SUBSD,
     MULSD,
     DIVSD
 };
 
-// NEW: Condition codes for jumps and sets
+
 enum class CondCode {
-    E,  // Equal
-    NE, // Not Equal
-    L,  // Less Than
-    LE, // Less Than or Equal
-    G,  // Greater Than
+    E,  
+    NE, 
+    L,  
+    LE, 
+    G,  
     GE,
     A,
     AE,
     B,
-    BE  // Greater Than or Equal
+    BE  
 
 };
 
@@ -47,7 +47,7 @@ enum class RegType {
     DX,
     R10,
     R11,
-    // XMM registers for floating point
+    
     XMM0,
     XMM1,
     XMM2,
@@ -58,15 +58,15 @@ enum class RegType {
     XMM7
 };
 
-// --- Register Struct ---
+
 
 struct Reg {
     RegType type;
     explicit Reg(RegType type) : type(type) {}
 };
 
-// --- Operands (matches ASDL 'operand = ...') ---
-// Note: Stack carries optional size (bytes) for emitter to select movsd vs movl.
+
+
 struct Operand {
     virtual ~Operand() = default;
 };
@@ -88,11 +88,11 @@ struct Pseudo : public Operand {
 
 struct Stack : public Operand {
     int val;
-    int size; // bytes (4 for int, 8 for double)
+    int size; 
     explicit Stack(int val, int size = 4) : val(val), size(size) {}
 };
 
-// --- Instructions (matches ASDL 'instruction = ...') ---
+
 
 struct Instruction {
     virtual ~Instruction() = default;
@@ -101,13 +101,13 @@ struct Instruction {
 struct MovInstruction : public Instruction {
     std::unique_ptr<Operand> src;
     std::unique_ptr<Operand> dest;
-    // integer/int32 'movl' semantics
+    
     MovInstruction(std::unique_ptr<Operand> src, std::unique_ptr<Operand> dest) 
         : src(std::move(src)), dest(std::move(dest)) {}
 };
 
-// Floating move (movsd) with 64-bit double semantics.
-// src/dest may be Register(XMM)/Stack/Memory/Immediate (Immediate -> load constant required)
+
+
 struct MovSDInstruction : public Instruction {
     std::unique_ptr<Operand> src;
     std::unique_ptr<Operand> dest;
@@ -117,7 +117,7 @@ struct MovSDInstruction : public Instruction {
 
 struct RetInstruction : public Instruction {};
 
-// Integer unary
+
 struct UnaryInstruction : public Instruction {
     UnaryType op; 
     std::unique_ptr<Operand> operand; 
@@ -126,7 +126,7 @@ struct UnaryInstruction : public Instruction {
         : op(op), operand(std::move(operand)) {}
 };
 
-// BinaryInstruction carries BinaryType; it can represent both integer and FP binary ops
+
 struct BinaryInstruction : public Instruction {
     BinaryType op;
     std::unique_ptr<Operand> lhs;
@@ -136,17 +136,17 @@ struct BinaryInstruction : public Instruction {
         : op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
 };
 
-// Add this struct definition in ir.h
 
 
 
-// Integer (stack) to Double (XMM register) conversion
+
+
 
 struct CvtSI2SDInstruction : public Instruction {
 
-    std::unique_ptr<Operand> src;  // Source (must be 4-byte int, e.g., Stack(offset, 4))
+    std::unique_ptr<Operand> src;  
 
-    std::unique_ptr<Operand> dest; // Destination (must be XMM register)
+    std::unique_ptr<Operand> dest; 
 
     CvtSI2SDInstruction(std::unique_ptr<Operand> src, std::unique_ptr<Operand> dest)
 
@@ -161,13 +161,13 @@ struct IdivInstruction : public Instruction {
 
 struct CDQInstruction : public Instruction {};
 
-// Stack allocation
+
 struct AllocateStackInstruction : public Instruction {
     int n;
     explicit AllocateStackInstruction(int n) : n(n) {}
 }; 
 
-// --- NEW INSTRUCTIONS for Chapter 4 (already present) ---
+
 
 struct CmpInstruction : public Instruction {
     std::unique_ptr<Operand> lhs;
@@ -190,7 +190,7 @@ struct JmpCCInstruction : public Instruction {
 
 struct SetCCInstruction : public Instruction {
     CondCode cond;
-    std::unique_ptr<Operand> dest; // Destination must be a byte-capable register operand (emitter ensures)
+    std::unique_ptr<Operand> dest; 
     explicit SetCCInstruction(CondCode cond, std::unique_ptr<Operand> dest)
         : cond(cond), dest(std::move(dest)) {}
 };
@@ -200,8 +200,8 @@ struct LabelInstruction : public Instruction {
     explicit LabelInstruction(std::string name) : name(std::move(name)) {}
 };
 
-// --- NEW: FP compare instruction (ucomisd) ---
-// We use a CmpSDInstruction which instructs emitter to do an unordered compare of two doubles (ucomisd)
+
+
 struct CmpSDInstruction : public Instruction {
     std::unique_ptr<Operand> lhs;
     std::unique_ptr<Operand> rhs;
@@ -209,7 +209,7 @@ struct CmpSDInstruction : public Instruction {
         : lhs(std::move(lhs)), rhs(std::move(rhs)) {}
 };
 
-// --- Containers ---
+
 
 struct Function {
     std::string name;
@@ -220,6 +220,6 @@ struct Program {
     std::unique_ptr<Function> function;
 };
 
-} // namespace ir
+} 
 
-#endif // IR_H
+#endif 

@@ -6,7 +6,7 @@
 
 #include <map>
 
-#include <string> // <-- Added for std::to_string
+#include <string> 
 
 using std::cerr;
 using std::cout;
@@ -56,7 +56,7 @@ TokenType Lexer::get_identifier_type(const string &identifier)
         {"continue", TokenType::TOKEN_KEYWORD_CONTINUE},
         {"float", TokenType::TOKEN_KEYWORD_FLOAT},
         {"double", TokenType::TOKEN_KEYWORD_DOUBLE},
-        {"char", TokenType::TOKEN_KEYWORD_CHAR}, // <-- ADDED
+        {"char", TokenType::TOKEN_KEYWORD_CHAR},
     };
 
     auto it = keywords.find(identifier);
@@ -100,27 +100,22 @@ vector<Token> Lexer::tokenize()
             continue;
         }
 
-        // Numbers: integer and floating-point
         if (is_digit(current_char))
         {
             bool is_float = false;
-            // integer part
             while (is_digit(peek()))
                 advance();
 
-            // fractional part
-            // fractional part
+           
             if (peek() == '.')
             {
-                // Accept a '.' after digits even if no fractional digits follow (e.g., "1.").
-                // That makes "1." a valid floating literal. If there are digits after '.', consume them.
+               
                 is_float = true;
                 advance(); // consume '.'
                 while (is_digit(peek()))
                     advance();
             }
 
-            // exponent part
             if (peek() == 'e' || peek() == 'E')
             {
                 is_float = true;
@@ -129,7 +124,6 @@ vector<Token> Lexer::tokenize()
                     advance();
                 if (!is_digit(peek()))
                 {
-                    // malformed exponent
                     string value = source.substr(start_pos, current_pos - start_pos);
                     had_error = true;
                     cerr << "Lexer Error: Malformed floating constant '" << value << "' at line " << line << endl;
@@ -140,7 +134,6 @@ vector<Token> Lexer::tokenize()
                     advance();
             }
 
-            // After numeric literal, ensure it's not followed by identifier chars (e.g., 123abc)
             if (isalpha(peek()) || peek() == '_')
             {
                 while (isalnum(peek()) || peek() == '_')
@@ -168,14 +161,13 @@ vector<Token> Lexer::tokenize()
             continue;
         }
 
-        // Handle a float that starts with '.' like .5
         if (current_char == '.')
         {
             if (current_pos + 1 < source.length() && is_digit(source[current_pos + 1]))
             {
                 size_t start = current_pos;
                 bool is_float = true;
-                advance(); // consume '.'
+                advance(); 
                 while (is_digit(peek()))
                     advance();
 
@@ -202,8 +194,7 @@ vector<Token> Lexer::tokenize()
             }
             else
             {
-                // a standalone '.' is not currently part of the supported grammar in this lexer
-                // mark as illegal to avoid silently dropping it
+                
                 string val(1, advance());
                 had_error = true;
                 cerr << "Lexer Error: Illegal character '.' at line " << line << endl;
@@ -216,7 +207,6 @@ vector<Token> Lexer::tokenize()
 
         switch (single_char_val[0])
         {
-            // Punctuation
         case '(':
             tokens.push_back(create_token(TokenType::TOKEN_OPEN_PAREN, single_char_val));
             break;
@@ -239,7 +229,6 @@ vector<Token> Lexer::tokenize()
             tokens.push_back(create_token(TokenType::TOKEN_COLON, single_char_val));
             break;
 
-            // Simple Operators
         case '+':
             tokens.push_back(create_token(TokenType::TOKEN_OPERATOR_PLUS, single_char_val));
             break;
@@ -253,7 +242,6 @@ vector<Token> Lexer::tokenize()
             tokens.push_back(create_token(TokenType::TOKEN_OPERATOR_BITWISE_COMPLEMENT, single_char_val));
             break;
 
-            // Operators with lookahead
         case '-':
             if (peek() == '-')
             {
@@ -304,7 +292,6 @@ vector<Token> Lexer::tokenize()
             }
             break;
 
-            // NEW: Chapter 4 operators with lookahead
         case '!':
             if (peek() == '=')
             {
@@ -372,7 +359,6 @@ vector<Token> Lexer::tokenize()
             }
             break;
 
-            // NEW: Chapter 4 "skip" rules
         case '#':
             while (peek() != '\n' && peek() != '\0')
             {
@@ -408,27 +394,25 @@ vector<Token> Lexer::tokenize()
             }
             break;
 
-            // --- ADDED BLOCK for char literals ---
         case '\'':
         {
-            size_t literal_start_pos = current_pos - 1; // Start of the literal (at the opening ' )
+            size_t literal_start_pos = current_pos - 1; 
             char char_value = 0;
-            if (peek() == '\'') // Check for empty char literal ''
+            if (peek() == '\'') 
             {
                 had_error = true;
                 cerr << "Lexer Error: Empty character literal at line " << line << endl;
-                advance(); // consume closing '
+                advance(); 
                 string literal_string = source.substr(literal_start_pos, current_pos - literal_start_pos);
                 tokens.push_back(create_token(TokenType::TOKEN_ILLEGAL, literal_string));
                 break;
             }
 
-            // Handle escape sequence
             if (peek() == '\\')
             {
-                advance(); // consume '\'
+                advance(); 
                 if (peek() == '\0' || peek() == '\n')
-                { // Error: unterminated escape
+                { 
                     had_error = true;
                     cerr << "Lexer Error: Unterminated escape sequence in character literal at line " << line << endl;
                     string literal_string = source.substr(literal_start_pos, current_pos - literal_start_pos);
@@ -454,42 +438,36 @@ vector<Token> Lexer::tokenize()
                     char_value = '\'';
                     break;
                 default:
-                    char_value = escaped_char; // e.g., '\c' is just 'c'
+                    char_value = escaped_char; 
                 }
             }
-            else // Handle normal character
+            else 
             {
                 char_value = advance();
             }
 
-            // Check for closing quote
             if (peek() != '\'')
             {
                 had_error = true;
                 cerr << "Lexer Error: Unterminated or multi-character literal at line " << line << endl;
-                // consume until a likely end
                 while (peek() != '\'' && peek() != '\n' && peek() != '\0')
                     advance();
                 if (peek() == '\'')
-                    advance(); // consume the ' if it's there
+                    advance(); 
                 string literal_string = source.substr(literal_start_pos, current_pos - literal_start_pos);
                 tokens.push_back(create_token(TokenType::TOKEN_ILLEGAL, literal_string));
                 break;
             }
 
-            advance(); // consume closing '
+            advance(); 
             string literal_string = source.substr(literal_start_pos, current_pos - literal_start_pos);
             string value_string = std::to_string(static_cast<int>(char_value));
-            // Create token with the literal string for correct column calculation
             Token t = create_token(TokenType::TOKEN_CONSTANT, literal_string);
-            // Overwrite the token's value with the integer ASCII value
             t.value = value_string;
             tokens.push_back(t);
             break;
         }
-            // --- END ADDED BLOCK ---
 
-        // ADDED: support for array brackets
         case '[':
             tokens.push_back(create_token(TokenType::TOKEN_OPEN_BRACKET, single_char_val));
             break;
@@ -521,7 +499,7 @@ const char *token_type_to_string(TokenType type)
         return "KEYWORD_VOID";
     case TokenType::TOKEN_KEYWORD_RETURN:
         return "KEYWORD_RETURN";
-    case TokenType::TOKEN_KEYWORD_CHAR: // <-- ADDED
+    case TokenType::TOKEN_KEYWORD_CHAR: 
         return "KEYWORD_CHAR";
     case TokenType::TOKEN_IDENTIFIER:
         return "IDENTIFIER";
@@ -553,7 +531,6 @@ const char *token_type_to_string(TokenType type)
         return "OPERATOR_MODULO";
     case TokenType::TOKEN_OPERATOR_DECREMENT:
         return "OPERATOR_DECREMENT";
-        // NEW: Add strings for new operators
     case TokenType::TOKEN_OPERATOR_LOGICAL_NEG:
         return "OPERATOR_LOGICAL_NEG";
     case TokenType::TOKEN_OPERATOR_LOGICAL_AND:
@@ -581,7 +558,6 @@ const char *token_type_to_string(TokenType type)
     case TokenType::TOKEN_ILLEGAL:
         return "ILLEGAL";
 
-    // ADDED: bracket token strings
     case TokenType::TOKEN_OPEN_BRACKET:
         return "OPEN_BRACKET";
     case TokenType::TOKEN_CLOSE_BRACKET:

@@ -5,7 +5,7 @@
 #include <ostream>
 #include <string>
 
-// Using declarations for convenience
+
 using std::string;
 using std::ostream;
 
@@ -21,4 +21,4 @@ private:
     void emit_operand(const ir::Operand* op);
 };
 
-#endif // EMITTER_H
+#endif 

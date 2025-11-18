@@ -6,40 +6,36 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "type.h"  // SimpleType enum
-// ---------- Forward declarations (needed before unique_ptr<T> usage) ----------
+#include "type.h"  
 struct ExprAST;
 struct DeclarationAST;
 struct StatementAST;
 struct BlockItemAST;
 struct BlockAST;
 
-// ---------- For-init nodes ----------
 struct ForInitAST {
     ForInitAST() = default;
-    virtual ~ForInitAST() = default;  // <-- make base polymorphic for dynamic_cast
+    virtual ~ForInitAST() = default;  
 };
 struct ForInitExprAST : ForInitAST {
-    std::unique_ptr<ExprAST> InitExpr; // can be nullptr
+    std::unique_ptr<ExprAST> InitExpr; 
     explicit ForInitExprAST(std::unique_ptr<ExprAST> init_expr)
         : InitExpr(std::move(init_expr)) {}
 };
 
 struct ForInitDeclAST : ForInitAST {
-    std::unique_ptr<DeclarationAST> InitDecl; // cannot be nullptr
+    std::unique_ptr<DeclarationAST> InitDecl; 
     explicit ForInitDeclAST(std::unique_ptr<DeclarationAST> init_decl)
         : InitDecl(std::move(init_decl)) {}
 };
 
-// ---------- Base class for all expressions ----------
 struct ExprAST {
     virtual ~ExprAST() = default;
 };
 
-// ---------- Expression Nodes (as per ASDL) ----------
 struct ConstantExprAST : ExprAST {
-    std::string Val;          // the literal text as written (e.g., "1", "3.14", "1e-3")
-    SimpleType literal_type;  // optional: explicit literal type if known (INT/FLOAT/DOUBLE)
+    std::string Val;          
+    SimpleType literal_type;  
     ConstantExprAST(std::string val, SimpleType t = SimpleType::UNKNOWN)
         : Val(std::move(val)), literal_type(t) {}
 };
@@ -51,9 +47,8 @@ struct VarExprAST : ExprAST {
         : Name(std::move(name)), literal_type(std::move(t)) {}
 };
 
-// New: Indexing expression for array access (base[index])
 struct IndexExprAST : ExprAST {
-    std::unique_ptr<ExprAST> Base; // can be VarExprAST or another IndexExprAST (for multidim)
+    std::unique_ptr<ExprAST> Base; 
     std::unique_ptr<ExprAST> Index;
     IndexExprAST(std::unique_ptr<ExprAST> base, std::unique_ptr<ExprAST> index)
         : Base(std::move(base)), Index(std::move(index)) {}
@@ -92,12 +87,10 @@ struct ConditionalExprAST : ExprAST {
           ElseExpr(std::move(else_expr)) {}
 };
 
-// ---------- Base class for items in a function body ----------
 struct BlockItemAST {
     virtual ~BlockItemAST() = default;
 };
 
-// ---------- Statement Nodes (inherit from BlockItemAST) ----------
 struct StatementAST : BlockItemAST {
     virtual ~StatementAST() = default;
 };
@@ -121,7 +114,7 @@ struct NullStatementAST : StatementAST {
 struct IfStatementAST : StatementAST {
     std::unique_ptr<ExprAST> Condition;
     std::unique_ptr<StatementAST> ThenBranch;
-    std::unique_ptr<StatementAST> ElseBranch; // Can be nullptr
+    std::unique_ptr<StatementAST> ElseBranch; 
     IfStatementAST(std::unique_ptr<ExprAST> condition,
                    std::unique_ptr<StatementAST> then_branch,
                    std::unique_ptr<StatementAST> else_branch = nullptr)
@@ -156,8 +149,8 @@ struct DoWhileStatementAST : StatementAST {
 
 struct ForStatementAST : StatementAST {
     std::unique_ptr<ForInitAST> Init;
-    std::unique_ptr<ExprAST> Condition; // can be nullptr
-    std::unique_ptr<ExprAST> Increment; // can be nullptr
+    std::unique_ptr<ExprAST> Condition; 
+    std::unique_ptr<ExprAST> Increment; 
     std::unique_ptr<StatementAST> Body;
     ForStatementAST(std::unique_ptr<ForInitAST> init,
                     std::unique_ptr<ExprAST> condition,
@@ -169,38 +162,33 @@ struct ForStatementAST : StatementAST {
           Body(std::move(body)) {}
 };
 
-// ---------- Block container ----------
 struct BlockAST {
     std::vector<std::unique_ptr<BlockItemAST>> Items;
     explicit BlockAST(std::vector<std::unique_ptr<BlockItemAST>> items)
         : Items(std::move(items)) {}
 };
 
-// ---------- Compound statement that owns a BlockAST ----------
 struct CompoundStatementAST : StatementAST {
     std::unique_ptr<BlockAST> body_;
     explicit CompoundStatementAST(std::unique_ptr<BlockAST> body)
         : body_(std::move(body)) {}
 };
 
-// ---------- Declaration Node (also inherits from BlockItemAST) ----------
-// Now supports optional array size (array_size == 0 => not an array)
 struct DeclarationAST : BlockItemAST {
-    SimpleType DeclType; // e.g., "int", "float", "double"
+    SimpleType DeclType; 
     std::string VarName;
-    std::unique_ptr<ExprAST> InitExpr; // Can be nullptr
-    int ArraySize; // 0 if not an array, positive for fixed-size arrays
+    std::unique_ptr<ExprAST> InitExpr; 
+    int ArraySize; 
     DeclarationAST(SimpleType decl_type, std::string var_name, std::unique_ptr<ExprAST> init_expr = nullptr, int array_size = 0)
         : DeclType(std::move(decl_type)), VarName(std::move(var_name)), InitExpr(std::move(init_expr)), ArraySize(array_size) {}
 };
 
-// ---------- Top Level ----------
 struct FunctionAST {
-    SimpleType ReturnType; // e.g., "int", "void", "float", "double"
+    SimpleType ReturnType; 
     std::string Name;
-    std::vector<std::unique_ptr<BlockItemAST>> Body; // list of BlockItemASTs
+    std::vector<std::unique_ptr<BlockItemAST>> Body; 
     FunctionAST(SimpleType return_type, std::string name, std::vector<std::unique_ptr<BlockItemAST>> body)
         : ReturnType(std::move(return_type)), Name(std::move(name)), Body(std::move(body)) {}
 };
 
-#endif // AST_H
+#endif 

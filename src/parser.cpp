@@ -16,7 +16,6 @@ using std::stringstream;
 using std::unique_ptr;
 using std::vector;
 
-// Initialize operator precedence
 const map<TokenType, int> Parser::OperatorPrecedence = {
     {TokenType::TOKEN_OPERATOR_ASSIGN, 1},
     {TokenType::TOKEN_OPERATOR_LOGICAL_OR, 5},
@@ -35,7 +34,6 @@ const map<TokenType, int> Parser::OperatorPrecedence = {
 
 Parser::Parser(const vector<Token> &tokens) : tokens(tokens) {}
 
-// --- Helper functions ---
 const Token &Parser::peek() { return tokens[current]; }
 
 const Token &Parser::advance()
@@ -70,36 +68,17 @@ int Parser::get_token_precedence()
     return (it != OperatorPrecedence.end()) ? it->second : -1;
 }
 
-// Utility: return true if the next token is a type specifier we support
 static bool is_type_specifier(const Token &tok)
 {
     return tok.type == TokenType::TOKEN_KEYWORD_INT ||
            tok.type == TokenType::TOKEN_KEYWORD_VOID ||
            tok.type == TokenType::TOKEN_KEYWORD_FLOAT ||
            tok.type == TokenType::TOKEN_KEYWORD_DOUBLE ||
-           tok.type == TokenType::TOKEN_KEYWORD_CHAR; // <-- ADDED
+           tok.type == TokenType::TOKEN_KEYWORD_CHAR; 
 }
 
-static std::string token_type_to_simple_string(const Token &tok)
-{
-    switch (tok.type)
-    {
-    case TokenType::TOKEN_KEYWORD_INT:
-        return "int";
-    case TokenType::TOKEN_KEYWORD_VOID:
-        return "void";
-    case TokenType::TOKEN_KEYWORD_FLOAT:
-        return "float";
-    case TokenType::TOKEN_KEYWORD_DOUBLE:
-        return "double";
-    case TokenType::TOKEN_KEYWORD_CHAR: // <-- ADDED
-        return "char";
-    default:
-        return "";
-    }
-}
 
-// --- Main entry point ---
+
 unique_ptr<FunctionAST> Parser::parse()
 {
     try
@@ -118,9 +97,8 @@ unique_ptr<FunctionAST> Parser::parse()
 
 unique_ptr<FunctionAST> Parser::parse_function()
 {
-    // Expect a type specifier (int/void/float/double/char)
     if (!is_type_specifier(peek()))
-        throw error(peek(), "Expected type specifier (int, void, float, double, char) at function start."); // <-- Modified error string
+        throw error(peek(), "Expected type specifier (int, void, float, double, char) at function start.");
 
     SimpleType return_type = SimpleType::UNKNOWN;
     switch (peek().type)
@@ -134,7 +112,7 @@ unique_ptr<FunctionAST> Parser::parse_function()
     case TokenType::TOKEN_KEYWORD_DOUBLE:
         return_type = SimpleType::DOUBLE;
         break;
-    case TokenType::TOKEN_KEYWORD_CHAR: // <-- ADDED
+    case TokenType::TOKEN_KEYWORD_CHAR: 
         return_type = SimpleType::CHAR;
         break;
     case TokenType::TOKEN_KEYWORD_VOID:
@@ -153,7 +131,7 @@ unique_ptr<FunctionAST> Parser::parse_function()
     if (!match(TokenType::TOKEN_OPEN_PAREN))
         throw error(peek(), "Expected '(' after function name.");
     if (peek().type == TokenType::TOKEN_KEYWORD_VOID)
-        advance(); // optional void param
+        advance(); 
     if (!match(TokenType::TOKEN_CLOSE_PAREN))
         throw error(peek(), "Expected ')' after parameters.");
 
@@ -172,7 +150,6 @@ unique_ptr<FunctionAST> Parser::parse_function()
     return make_unique<FunctionAST>(return_type, name, move(body));
 }
 
-// --- Block and declarations ---
 unique_ptr<BlockItemAST> Parser::parse_block_item()
 {
     if (is_type_specifier(peek()))
@@ -182,7 +159,6 @@ unique_ptr<BlockItemAST> Parser::parse_block_item()
 
 unique_ptr<DeclarationAST> Parser::parse_declaration()
 {
-    // Read and record declaration type
     if (!is_type_specifier(peek()))
         throw error(peek(), "Expected type specifier in declaration.");
     SimpleType decl_type;
@@ -197,7 +173,7 @@ unique_ptr<DeclarationAST> Parser::parse_declaration()
     case TokenType::TOKEN_KEYWORD_DOUBLE:
         decl_type = SimpleType::DOUBLE;
         break;
-    case TokenType::TOKEN_KEYWORD_CHAR: // <-- ADDED
+    case TokenType::TOKEN_KEYWORD_CHAR:
         decl_type = SimpleType::CHAR;
         break;
     default:
@@ -212,11 +188,9 @@ unique_ptr<DeclarationAST> Parser::parse_declaration()
     string name = advance().value;
     unique_ptr<ExprAST> init_expr = nullptr;
 
-    // --- ARRAY SUPPORT: optional [size] after the identifier ---
-    int array_size = 0; // 0 means not an array
+    int array_size = 0; 
     if (match(TokenType::TOKEN_OPEN_BRACKET))
     {
-        // Expect a constant integer literal for now
         if (!match(TokenType::TOKEN_CONSTANT))
             throw error(peek(), "Expected integer constant for array size.");
         Token size_tok = tokens[current - 1];
@@ -248,10 +222,8 @@ unique_ptr<DeclarationAST> Parser::parse_declaration()
     return make_unique<DeclarationAST>(decl_type, name, move(init_expr), array_size);
 }
 
-// --- Main statement parser ---
 unique_ptr<StatementAST> Parser::parse_statement()
 {
-    // Compound block
     if (match(TokenType::TOKEN_OPEN_BRACE))
     {
         vector<unique_ptr<BlockItemAST>> items;
@@ -262,7 +234,6 @@ unique_ptr<StatementAST> Parser::parse_statement()
         return make_unique<CompoundStatementAST>(make_unique<BlockAST>(move(items)));
     }
 
-    // return <expr> ;
     if (match(TokenType::TOKEN_KEYWORD_RETURN))
     {
         auto expr = parse_expression();
@@ -271,7 +242,6 @@ unique_ptr<StatementAST> Parser::parse_statement()
         return make_unique<ReturnStatementAST>(move(expr));
     }
 
-    // break ;
     if (match(TokenType::TOKEN_KEYWORD_BREAK))
     {
         if (!match(TokenType::TOKEN_SEMICOLON))
@@ -279,7 +249,6 @@ unique_ptr<StatementAST> Parser::parse_statement()
         return make_unique<BreakStatementAST>();
     }
 
-    // continue ;
     if (match(TokenType::TOKEN_KEYWORD_CONTINUE))
     {
         if (!match(TokenType::TOKEN_SEMICOLON))
@@ -287,7 +256,6 @@ unique_ptr<StatementAST> Parser::parse_statement()
         return make_unique<ContinueStatementAST>();
     }
 
-    // while ( <cond> ) <stmt>
     if (match(TokenType::TOKEN_KEYWORD_WHILE))
     {
         if (!match(TokenType::TOKEN_OPEN_PAREN))
@@ -299,7 +267,6 @@ unique_ptr<StatementAST> Parser::parse_statement()
         return make_unique<WhileStatementAST>(move(cond), move(body));
     }
 
-    // do <stmt> while ( <cond> ) ;
     if (match(TokenType::TOKEN_KEYWORD_DO))
     {
         auto body = parse_statement();
@@ -315,7 +282,6 @@ unique_ptr<StatementAST> Parser::parse_statement()
         return make_unique<DoWhileStatementAST>(move(body), move(cond));
     }
 
-    // for ( <for-init> [<cond>] ; [<post>] ) <stmt>
     if (match(TokenType::TOKEN_KEYWORD_FOR))
     {
         if (!match(TokenType::TOKEN_OPEN_PAREN))
@@ -325,7 +291,6 @@ unique_ptr<StatementAST> Parser::parse_statement()
 
         if (is_type_specifier(peek()))
         {
-            // declaration for-init (parse_declaration consumes the ';')
             auto decl = parse_declaration();
             init = make_unique<ForInitDeclAST>(move(decl));
         }
@@ -355,11 +320,9 @@ unique_ptr<StatementAST> Parser::parse_statement()
         return make_unique<ForStatementAST>(move(init), move(cond), move(post), move(body));
     }
 
-    // empty statement ;
     if (match(TokenType::TOKEN_SEMICOLON))
         return make_unique<NullStatementAST>();
 
-    // if (<cond>) <stmt> [else <stmt>]
     if (match(TokenType::TOKEN_KEYWORD_IF))
     {
         if (!match(TokenType::TOKEN_OPEN_PAREN))
@@ -374,28 +337,25 @@ unique_ptr<StatementAST> Parser::parse_statement()
         return make_unique<IfStatementAST>(move(cond), move(then_branch), move(else_branch));
     }
 
-    // Expression statement
     auto expr = parse_expression();
     if (!match(TokenType::TOKEN_SEMICOLON))
         throw error(peek(), "Expected ';' after expression.");
     return make_unique<ExpressionStatementAST>(move(expr));
 }
 
-// --- Expression parsing ---
 unique_ptr<ExprAST> Parser::parse_expression(int min_precedence)
 {
     auto lhs = parse_factor();
 
     while (true)
     {
-        // Ternary ?: operator
         if (!is_at_end() && peek().type == TokenType::TOKEN_QUESTION)
         {
             int condPrec = 3;
             if (condPrec < min_precedence)
                 break;
 
-            advance(); // consume '?'
+            advance(); 
             auto thenExpr = parse_expression(0);
             if (!match(TokenType::TOKEN_COLON))
                 throw error(peek(), "Expected ':' in conditional expression.");
@@ -435,7 +395,6 @@ static SimpleType token_to_simple_type(TokenType tt)
 
 unique_ptr<ExprAST> Parser::parse_factor()
 {
-    // Constants
     if (match(TokenType::TOKEN_CONSTANT))
     {
         Token t = tokens[current - 1];
@@ -448,17 +407,13 @@ unique_ptr<ExprAST> Parser::parse_factor()
         return make_unique<ConstantExprAST>(t.value, token_to_simple_type(t.type));
     }
 
-    // Identifier (variable) and possible array indexing chains
     if (match(TokenType::TOKEN_IDENTIFIER))
     {
         string name = tokens[current - 1].value;
-        // Start with a VarExprAST as the base
         unique_ptr<ExprAST> base = make_unique<VarExprAST>(name);
 
-        // Handle zero or more indexing operations: a[expr][expr]...
         while (peek().type == TokenType::TOKEN_OPEN_BRACKET)
         {
-            // consume '['
             advance();
 
             auto index_expr = parse_expression();
@@ -472,9 +427,7 @@ unique_ptr<ExprAST> Parser::parse_factor()
         return base;
     }
 
-    // Unary operators
-    // Note: match() calls consume the token; using sequence of match() calls is preserved
-    // from your original code but it consumes - that's fine since we want to consume unary op.
+    
     if (match(TokenType::TOKEN_OPERATOR_MINUS) ||
         match(TokenType::TOKEN_OPERATOR_BITWISE_COMPLEMENT) ||
         match(TokenType::TOKEN_OPERATOR_LOGICAL_NEG))

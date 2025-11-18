@@ -17,7 +17,6 @@ private:
     const std::vector<Token>& tokens;
     size_t current = 0;
     
-    // A map to store operator precedence
     static const std::map<TokenType, int> OperatorPrecedence;
 
     const Token& peek();
@@ -26,16 +25,13 @@ private:
     bool match(TokenType type);
     std::runtime_error error(const Token& token, const std::string& message);
 
-    // New helper to get precedence
     int get_token_precedence();
 
-    // Updated parsing functions
     std::unique_ptr<FunctionAST> parse_function();
     std::unique_ptr<BlockItemAST> parse_block_item();
     std::unique_ptr<StatementAST> parse_statement();
     std::unique_ptr<DeclarationAST> parse_declaration();
 
-    // The new precedence climbing parser
     std::unique_ptr<ExprAST> parse_expression(int min_precedence = 0);
     std::unique_ptr<ExprAST> parse_factor();
 };
